@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-GreatNote is a minimal personal notes app. A single user creates, edits, and deletes notes. No auth, no sharing, no collaboration.
+GreatNote is a minimal personal notes app with a Book/Page hierarchy. A single user creates books, and each book contains pages. No auth, no sharing, no collaboration.
 
 ## Tech Stack
 
@@ -55,7 +55,7 @@ python manage.py test notes.tests.test_services
 
 Run a single test case:
 ```bash
-python manage.py test notes.tests.test_services.NoteServiceTests.test_create_note
+python manage.py test notes.tests.test_services.BookServiceTests.test_create_book_with_title
 ```
 
 ### Frontend
@@ -81,40 +81,61 @@ npm run lint
 
 ### Frontend
 
-- `frontend/src/App.jsx` — root component, holds global note list state
-- `frontend/src/components/` — presentational components (`NoteList`, `NoteEditor`, `NoteCard`)
-- `frontend/src/api.js` — thin fetch wrapper around `/api/notes/`
+- `frontend/src/App.jsx` — root component, holds global book list state
+- `frontend/src/components/Sidebar.jsx` — left sidebar: search, book list (expandable), page list, create/delete actions
+- `frontend/src/components/PageEditor.jsx` — right editor: title input + content textarea with auto-save
+- `frontend/src/api.js` — thin fetch wrapper around `/api/books/` and `/api/pages/`
 
-State is kept simple: `App` fetches notes on mount and passes callbacks down. No external state library.
+State is kept simple: `App` fetches books on mount. Each book can be expanded to show its pages. No external state library.
 
 ### Backend
 
 - `backend/notes/` — the only app besides Django admin
-  - `models.py` — `Note` model: `title`, `content`, `created_at`, `updated_at`
-  - `serializers.py` — DRF serializer for `Note`
-  - `views.py` — `NoteViewSet` (ModelViewSet)
+  - `models.py` — `Book` and `Page` models with `title`, `content`, `created_at`, `updated_at`
+  - `serializers.py` — DRF serializers; `BookSerializer` nests `PageSerializer` (read-only)
+  - `views.py` — `BookViewSet` and `PageViewSet` (ModelViewSet)
   - `services.py` — **business logic lives here**. Views are thin and delegate to service functions. This is the layer that is unit-tested.
   - `tests/test_services.py` — unit tests for `services.py`
   - `tests/test_views.py` — integration tests for the API endpoints
 
-- `backend/greatnote/urls.py` — routes `/api/notes/` to the `NoteViewSet` via DRF router
+- `backend/greatnote/urls.py` — routes `/api/` to `notes.urls`
+- `backend/notes/urls.py` — DRF router for `/api/books/` and `/api/pages/`
 
 ### API Contract
 
-The frontend expects a REST API at `/api/notes/` with standard DRF ModelViewSet behavior:
+The frontend expects a REST API with standard DRF ModelViewSet behavior:
 
-- `GET /api/notes/` — list all notes (newest first)
-- `POST /api/notes/` — create a note
-- `GET /api/notes/<id>/` — retrieve a note
-- `PUT /api/notes/<id>/` — update a note
-- `DELETE /api/notes/<id>/` — delete a note
+**Books:**
+- `GET /api/books/` — list all books (newest first)
+- `POST /api/books/` — create a book
+- `GET /api/books/<id>/` — retrieve a book (includes nested pages)
+- `PUT /api/books/<id>/` — update a book title
+- `DELETE /api/books/<id>/` — delete a book (cascades to pages)
 
-Response shape:
+**Pages:**
+- `GET /api/pages/` — list all pages (supports `?book_id=` and `?search=`)
+- `POST /api/pages/` — create a page
+- `GET /api/pages/<id>/` — retrieve a page
+- `PUT /api/pages/<id>/` — update a page title/content
+- `DELETE /api/pages/<id>/` — delete a page
+
+Response shapes:
 ```json
+// Book
 {
   "id": 1,
-  "title": "...",
-  "content": "...",
+  "title": "My Journal",
+  "pages": [...],
+  "created_at": "2026-04-29T12:00:00Z",
+  "updated_at": "2026-04-29T12:00:00Z"
+}
+
+// Page
+{
+  "id": 1,
+  "book": 1,
+  "title": "Untitled",
+  "content": "",
   "created_at": "2026-04-29T12:00:00Z",
   "updated_at": "2026-04-29T12:00:00Z"
 }

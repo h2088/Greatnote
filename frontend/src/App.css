@@ -113,6 +113,17 @@ body {
   text-overflow: ellipsis;
 }
 
+.book-title-input-inline {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid #999;
+  border-radius: 3px;
+  padding: 2px 4px;
+  outline: none;
+  font-family: inherit;
+}
+
 .book-delete {
   width: 18px;
   height: 18px;

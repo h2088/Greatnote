@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import Sidebar from './components/Sidebar.jsx'
 import PageEditor from './components/PageEditor.jsx'
-import { getBooks, createBook, deleteBook, getPages, createPage, updatePage, deletePage } from './api.js'
+import { getBooks, createBook, updateBook, deleteBook, getPages, createPage, updatePage, deletePage } from './api.js'
 import './App.css'
 
 export default function App() {
@@ -50,6 +50,14 @@ export default function App() {
     setSelectedPageId(newPage.id)
   }
 
+  const handleUpdateBook = async (bookId, title) => {
+    const book = books.find(b => b.id === bookId)
+    if (!book || book.title === title) return
+    await updateBook(bookId, title)
+    const updated = await getBooks()
+    setBooks(updated)
+  }
+
   const handleDeleteBook = async (bookId) => {
     await deleteBook(bookId)
     const updated = await getBooks()
@@ -96,6 +104,7 @@ export default function App() {
         onSelectPage={handleSelectPage}
         onDeletePage={handleDeletePage}
         onDeleteBook={handleDeleteBook}
+        onUpdateBook={handleUpdateBook}
         onCreateBook={handleCreateBook}
         onCreatePage={handleCreatePage}
         onToggleBook={handleToggleBook}

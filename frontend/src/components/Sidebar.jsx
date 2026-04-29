@@ -1,16 +1,54 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
-function BookSection({ book, isExpanded, onToggle, selectedPageId, onSelectPage, onDeletePage, onDeleteBook }) {
+function BookSection({ book, isExpanded, onToggle, selectedPageId, onSelectPage, onDeletePage, onDeleteBook, onUpdateBook }) {
+  const [isEditing, setIsEditing] = useState(false)
+  const [editTitle, setEditTitle] = useState(book.title)
+
+  const handleDoubleClick = () => {
+    setIsEditing(true)
+    setEditTitle(book.title)
+  }
+
+  const handleSave = () => {
+    setIsEditing(false)
+    if (editTitle.trim() && editTitle !== book.title) {
+      onUpdateBook(book.id, editTitle.trim())
+    }
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      handleSave()
+    } else if (e.key === 'Escape') {
+      setIsEditing(false)
+      setEditTitle(book.title)
+    }
+  }
+
   return (
     <div className="book-section">
       <div className="book-header" onClick={onToggle}>
         <span className={`book-chevron ${isExpanded ? 'expanded' : ''}`}>▶</span>
-        <span className="book-title">{book.title}</span>
+        {isEditing ? (
+          <input
+            className="book-title-input-inline"
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+            onBlur={handleSave}
+            onKeyDown={handleKeyDown}
+            autoFocus
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span className="book-title" onDoubleClick={handleDoubleClick}>{book.title}</span>
+        )}
         <button
           className="book-delete"
           onClick={(e) => {
             e.stopPropagation()
-            onDeleteBook(book.id)
+            if (window.confirm('Delete this book and all its pages?')) {
+              onDeleteBook(book.id)
+            }
           }}
         >
           ×
@@ -29,7 +67,9 @@ function BookSection({ book, isExpanded, onToggle, selectedPageId, onSelectPage,
                 className="page-delete"
                 onClick={(e) => {
                   e.stopPropagation()
-                  onDeletePage(page.id)
+                  if (window.confirm('Delete this page?')) {
+                    onDeletePage(page.id)
+                  }
                 }}
               >
                 ×
@@ -45,18 +85,27 @@ function BookSection({ book, isExpanded, onToggle, selectedPageId, onSelectPage,
   )
 }
 
-export default function Sidebar({ books, selectedPageId, selectedBookId, onSelectPage, onDeletePage, onDeleteBook, onCreateBook, onCreatePage, onToggleBook }) {
+export default function Sidebar({ books, selectedPageId, selectedBookId, onSelectPage, onDeletePage, onDeleteBook, onUpdateBook, onCreateBook, onCreatePage, onToggleBook }) {
   const [search, setSearch] = useState('')
 
-  const filteredBooks = search
-    ? books.map(book => ({
-        ...book,
-        pages: (book.pages || []).filter(p =>
-          p.title.toLowerCase().includes(search.toLowerCase()) ||
-          p.content.toLowerCase().includes(search.toLowerCase())
+  const filteredBooks = useMemo(() => {
+    if (!search.trim()) return books
+    const term = search.toLowerCase()
+    return books
+      .map(book => {
+        const matchingPages = (book.pages || []).filter(p =>
+          p.title.toLowerCase().includes(term) ||
+          p.content.toLowerCase().includes(term)
         )
-      })).filter(book => book.pages.length > 0 || book.title.toLowerCase().includes(search.toLowerCase()))
-    : books
+        const titleMatches = book.title.toLowerCase().includes(term)
+        return {
+          ...book,
+          pages: matchingPages,
+          _matchesSearch: matchingPages.length > 0 || titleMatches,
+        }
+      })
+      .filter(book => book._matchesSearch)
+  }, [books, search])
 
   return (
     <div className="sidebar">
@@ -86,6 +135,7 @@ export default function Sidebar({ books, selectedPageId, selectedBookId, onSelec
             onSelectPage={onSelectPage}
             onDeletePage={onDeletePage}
             onDeleteBook={onDeleteBook}
+            onUpdateBook={onUpdateBook}
           />
         ))}
         {filteredBooks.length === 0 && (
