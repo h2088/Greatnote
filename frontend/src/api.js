@@ -6,6 +6,7 @@ async function request(path, options = {}) {
     headers: {
       'Content-Type': 'application/json',
     },
+    cache: 'no-store',
     ...options,
   })
   if (!response.ok) {
@@ -48,17 +49,17 @@ export function getPages(bookId, search = '') {
   return request(`/pages/${query}`)
 }
 
-export function createPage(bookId, title = 'Untitled', content = '') {
+export function createPage(bookId, title = 'Untitled', content = '', is_favorite = false) {
   return request('/pages/', {
     method: 'POST',
-    body: JSON.stringify({ book: bookId, title, content }),
+    body: JSON.stringify({ book: bookId, title, content, is_favorite }),
   })
 }
 
-export function updatePage(id, { title, content }) {
+export function updatePage(id, { title, content, is_favorite }) {
   return request(`/pages/${id}/`, {
     method: 'PUT',
-    body: JSON.stringify({ title, content }),
+    body: JSON.stringify({ title, content, is_favorite }),
   })
 }
 

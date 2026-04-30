@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 
-function BookSection({ book, isExpanded, onToggle, selectedPageId, onSelectPage, onDeletePage, onDeleteBook, onUpdateBook }) {
+function BookSection({ book, isExpanded, onToggle, selectedPageId, onSelectPage, onDeletePage, onDeleteBook, onUpdateBook, onToggleFavorite }) {
   const [isEditing, setIsEditing] = useState(false)
   const [editTitle, setEditTitle] = useState(book.title)
 
@@ -62,6 +62,15 @@ function BookSection({ book, isExpanded, onToggle, selectedPageId, onSelectPage,
               className={`page-item ${page.id === selectedPageId ? 'selected' : ''}`}
               onClick={() => onSelectPage(page.id)}
             >
+              <button
+                className={`page-star ${page.is_favorite ? 'favorited' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleFavorite(page.id)
+                }}
+              >
+                {page.is_favorite ? '★' : '☆'}
+              </button>
               <span className="page-title">{page.title || 'Untitled'}</span>
               <button
                 className="page-delete"
@@ -85,7 +94,7 @@ function BookSection({ book, isExpanded, onToggle, selectedPageId, onSelectPage,
   )
 }
 
-export default function Sidebar({ books, selectedPageId, selectedBookId, onSelectPage, onDeletePage, onDeleteBook, onUpdateBook, onCreateBook, onCreatePage, onToggleBook }) {
+export default function Sidebar({ books, selectedPageId, selectedBookId, onSelectPage, onDeletePage, onDeleteBook, onUpdateBook, onCreateBook, onCreatePage, onToggleBook, onToggleFavorite }) {
   const [search, setSearch] = useState('')
 
   const filteredBooks = useMemo(() => {
@@ -136,6 +145,7 @@ export default function Sidebar({ books, selectedPageId, selectedBookId, onSelec
             onDeletePage={onDeletePage}
             onDeleteBook={onDeleteBook}
             onUpdateBook={onUpdateBook}
+            onToggleFavorite={onToggleFavorite}
           />
         ))}
         {filteredBooks.length === 0 && (

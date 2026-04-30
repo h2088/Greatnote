@@ -6,7 +6,7 @@ from .models import Book, Page
 class PageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Page
-        fields = ["id", "book", "title", "content", "created_at", "updated_at"]
+        fields = ["id", "book", "title", "content", "is_favorite", "created_at", "updated_at"]
 
 
 class BookSerializer(serializers.ModelSerializer):

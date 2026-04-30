@@ -60,12 +60,17 @@ class PageServiceTests(TestCase):
         page = create_page(self.book.id)
         self.assertEqual(page.title, "Untitled")
         self.assertEqual(page.content, "")
+        self.assertEqual(page.is_favorite, False)
         self.assertEqual(page.book.id, self.book.id)
 
     def test_create_page_with_values(self):
         page = create_page(self.book.id, title="Intro", content="Hello")
         self.assertEqual(page.title, "Intro")
         self.assertEqual(page.content, "Hello")
+
+    def test_create_page_with_favorite(self):
+        page = create_page(self.book.id, title="Important", content="Note", is_favorite=True)
+        self.assertEqual(page.is_favorite, True)
 
     def test_get_page(self):
         page = create_page(self.book.id, title="Target", content="Find me")
@@ -83,6 +88,18 @@ class PageServiceTests(TestCase):
         updated = update_page(page.id, content="New")
         self.assertEqual(updated.title, "Keep")
         self.assertEqual(updated.content, "New")
+
+    def test_update_page_favorite(self):
+        page = create_page(self.book.id, title="Note", content="Body")
+        updated = update_page(page.id, is_favorite=True)
+        self.assertEqual(updated.is_favorite, True)
+
+    def test_update_page_favorite_only(self):
+        page = create_page(self.book.id, title="Keep", content="Keep")
+        updated = update_page(page.id, is_favorite=True)
+        self.assertEqual(updated.title, "Keep")
+        self.assertEqual(updated.content, "Keep")
+        self.assertEqual(updated.is_favorite, True)
 
     def test_delete_page(self):
         page = create_page(self.book.id, title="Delete me", content="Bye")
@@ -110,9 +127,10 @@ class PageServiceTests(TestCase):
         self.assertEqual(pages.count(), 1)
         self.assertEqual(pages.first().title, "Fruit")
 
-    def test_list_pages_ordered_by_updated(self):
+    def test_list_pages_ordered_by_favorite_then_updated(self):
         page1 = create_page(self.book.id, title="First", content="")
         page2 = create_page(self.book.id, title="Second", content="")
+        update_page(page1.id, is_favorite=True)
         pages = list_pages(book_id=self.book.id)
-        self.assertEqual(pages[0].id, page2.id)
-        self.assertEqual(pages[1].id, page1.id)
+        self.assertEqual(pages[0].id, page1.id)
+        self.assertEqual(pages[1].id, page2.id)

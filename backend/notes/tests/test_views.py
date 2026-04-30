@@ -72,7 +72,14 @@ class PageViewSetTests(TestCase):
         response = self.client.post("/api/pages/", data, format="json")
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["title"], "Intro")
+        self.assertEqual(response.data["is_favorite"], False)
         self.assertEqual(Page.objects.count(), 1)
+
+    def test_create_page_with_favorite(self):
+        data = {"book": self.book.id, "title": "Important", "content": "Note", "is_favorite": True}
+        response = self.client.post("/api/pages/", data, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["is_favorite"], True)
 
     def test_create_page_defaults(self):
         data = {"book": self.book.id}
@@ -80,6 +87,7 @@ class PageViewSetTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["title"], "Untitled")
         self.assertEqual(response.data["content"], "")
+        self.assertEqual(response.data["is_favorite"], False)
 
     def test_retrieve_page(self):
         page = Page.objects.create(book=self.book, title="Retrieve", content="me")
@@ -94,6 +102,14 @@ class PageViewSetTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         page.refresh_from_db()
         self.assertEqual(page.title, "New")
+
+    def test_update_page_favorite(self):
+        page = Page.objects.create(book=self.book, title="Note", content="Body")
+        data = {"is_favorite": True}
+        response = self.client.put(f"/api/pages/{page.id}/", data, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        page.refresh_from_db()
+        self.assertEqual(page.is_favorite, True)
 
     def test_delete_page(self):
         page = Page.objects.create(book=self.book, title="Delete", content="me")
@@ -117,3 +133,14 @@ class PageViewSetTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["title"], "Apple")
+
+    def test_list_pages_ordered_by_favorite(self):
+        Page.objects.create(book=self.book, title="Regular", content="")
+        favorite = Page.objects.create(book=self.book, title="Favorite", content="")
+        favorite.is_favorite = True
+        favorite.save()
+        response = self.client.get(f"/api/pages/?book_id={self.book.id}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(response.data[0]["title"], "Favorite")
+        self.assertEqual(response.data[1]["title"], "Regular")

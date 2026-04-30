@@ -31,21 +31,23 @@ def list_books(search_query=None):
     return queryset
 
 
-def create_page(book_id, title="Untitled", content=""):
+def create_page(book_id, title="Untitled", content="", is_favorite=False):
     book = Book.objects.get(id=book_id)
-    return Page.objects.create(book=book, title=title, content=content)
+    return Page.objects.create(book=book, title=title, content=content, is_favorite=is_favorite)
 
 
 def get_page(page_id):
     return Page.objects.get(id=page_id)
 
 
-def update_page(page_id, title=None, content=None):
+def update_page(page_id, title=None, content=None, is_favorite=None):
     page = Page.objects.get(id=page_id)
     if title is not None:
         page.title = title
     if content is not None:
         page.content = content
+    if is_favorite is not None:
+        page.is_favorite = is_favorite
     page.save()
     return page
 

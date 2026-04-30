@@ -44,14 +44,16 @@ class PageViewSet(viewsets.ModelViewSet):
         book_id = request.data.get("book")
         title = request.data.get("title", "Untitled")
         content = request.data.get("content", "")
-        page = create_page(book_id=book_id, title=title, content=content)
+        is_favorite = request.data.get("is_favorite", False)
+        page = create_page(book_id=book_id, title=title, content=content, is_favorite=is_favorite)
         serializer = self.get_serializer(page)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def update(self, request, pk=None):
         title = request.data.get("title")
         content = request.data.get("content")
-        page = update_page(pk, title=title, content=content)
+        is_favorite = request.data.get("is_favorite")
+        page = update_page(pk, title=title, content=content, is_favorite=is_favorite)
         serializer = self.get_serializer(page)
         return Response(serializer.data)
 
