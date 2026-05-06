@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(pip install *)",
+      "Bash(npm install *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
+      "Bash(python manage.py test)",
+      "Bash(git push *)",
+      "Bash(curl *)",
+      "Bash(python *)",
+      "Bash(git commit *)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill *)",
+      "Bash(cmd *)",
+      "Bash(powershell *)",
+      "Bash(npx vite *)",
+      "Bash(start *)",
+      "Bash(git add *)",
+      "Bash(mv notebook_app_by_cc/backend ./backend)",
+      "Bash(mv notebook_app_by_cc/frontend ./frontend)",
+      "Bash(mv notebook_app_by_cc/CLAUDE.md ./CLAUDE.md)",
+      "Bash(mv notebook_app_by_cc/README.md ./README.md)"
+    ]
+  }
+}

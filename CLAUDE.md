@@ -2,145 +2,101 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
-
-GreatNote is a minimal personal notes app with a Book/Page hierarchy. A single user creates books, and each book contains pages. No auth, no sharing, no collaboration.
-
-## Tech Stack
-
-- **Frontend**: React (Vite), plain CSS (no component library)
-- **Backend**: Django, Django REST Framework
-- **Database**: SQLite (default for local dev)
-
-## Running the App
-
-### Backend
-
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py runserver
-```
-
-Django admin: http://127.0.0.1:8000/admin/
-API root: http://127.0.0.1:8000/api/
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Vite dev server: http://localhost:5173
-
-## Testing
+## Commands
 
 ### Backend (Django)
-
-Run all tests:
 ```bash
 cd backend
-python manage.py test
+python manage.py runserver        # dev server on http://localhost:8000
+python manage.py migrate          # apply migrations (first-time setup)
+python manage.py makemigrations   # after changing models
+python manage.py test             # run tests
+python manage.py createsuperuser  # create admin user
+python manage.py shell            # Django REPL
 ```
 
-Run a single test file:
-```bash
-python manage.py test notes.tests.test_services
-```
-
-Run a single test case:
-```bash
-python manage.py test notes.tests.test_services.BookServiceTests.test_create_book_with_title
-```
-
-### Frontend
-
+### Frontend (React + Vite)
 ```bash
 cd frontend
-npm test
-```
-
-## Linting
-
-```bash
-cd backend
-ruff check .
-```
-
-```bash
-cd frontend
-npm run lint
+npm run dev      # dev server on http://localhost:5173
+npm run build    # production build
+npm run preview  # preview production build
+npm run lint     # ESLint
 ```
 
 ## Architecture
 
-### Frontend
+Full-stack notebook app: Django REST Framework backend + React 19 SPA frontend.
 
-- `frontend/src/App.jsx` — root component, holds global book list state
-- `frontend/src/components/Sidebar.jsx` — left sidebar: search, book list (expandable), page list, create/delete actions
-- `frontend/src/components/PageEditor.jsx` — right editor: title input + content textarea with auto-save
-- `frontend/src/api.js` — thin fetch wrapper around `/api/books/` and `/api/pages/`
+### Backend (`backend/`)
 
-State is kept simple: `App` fetches books on mount. Each book can be expanded to show its pages. No external state library.
+Single Django app `notebooks` handles all logic. Key files:
 
-### Backend
+- `config/settings.py` — JWT config (60-min access, 7-day refresh with rotation), CORS allowed for `localhost:5173`, SQLite by default
+- `config/urls.py` — mounts `notebooks/urls.py` at root
+- `notebooks/models.py` — three models: `Notebook` (FK→User), `Page` (FK→Notebook, content stored as JSONField for TipTap state), `ShareLink` (UUID token, FK→Page)
+- `notebooks/views.py` — function-based auth views (register, me) + DRF generic class-based views for resources
+- `notebooks/serializers.py` — separate list vs. detail serializers (list excludes page content); `share_token` is a computed `SerializerMethodField`
+- `notebooks/permissions.py` — `IsNotebookOwner` and `IsPageOwner` enforce object-level ownership
 
-- `backend/notes/` — the only app besides Django admin
-  - `models.py` — `Book` and `Page` models with `title`, `content`, `created_at`, `updated_at`
-  - `serializers.py` — DRF serializers; `BookSerializer` nests `PageSerializer` (read-only)
-  - `views.py` — `BookViewSet` and `PageViewSet` (ModelViewSet)
-  - `services.py` — **business logic lives here**. Views are thin and delegate to service functions. This is the layer that is unit-tested.
-  - `tests/test_services.py` — unit tests for `services.py`
-  - `tests/test_views.py` — integration tests for the API endpoints
-
-- `backend/greatnote/urls.py` — routes `/api/` to `notes.urls`
-- `backend/notes/urls.py` — DRF router for `/api/books/` and `/api/pages/`
-
-### API Contract
-
-The frontend expects a REST API with standard DRF ModelViewSet behavior:
-
-**Books:**
-- `GET /api/books/` — list all books (newest first)
-- `POST /api/books/` — create a book
-- `GET /api/books/<id>/` — retrieve a book (includes nested pages)
-- `PUT /api/books/<id>/` — update a book title
-- `DELETE /api/books/<id>/` — delete a book (cascades to pages)
-
-**Pages:**
-- `GET /api/pages/` — list all pages (supports `?book_id=` and `?search=`)
-- `POST /api/pages/` — create a page
-- `GET /api/pages/<id>/` — retrieve a page
-- `PUT /api/pages/<id>/` — update a page title/content
-- `DELETE /api/pages/<id>/` — delete a page
-
-Response shapes:
-```json
-// Book
-{
-  "id": 1,
-  "title": "My Journal",
-  "pages": [...],
-  "created_at": "2026-04-29T12:00:00Z",
-  "updated_at": "2026-04-29T12:00:00Z"
-}
-
-// Page
-{
-  "id": 1,
-  "book": 1,
-  "title": "Untitled",
-  "content": "",
-  "created_at": "2026-04-29T12:00:00Z",
-  "updated_at": "2026-04-29T12:00:00Z"
-}
+**URL structure:**
+```
+/api/auth/register/
+/api/auth/login/
+/api/auth/token/refresh/
+/api/auth/me/
+/api/notebooks/                        # list/create
+/api/notebooks/<id>/                   # retrieve/update/delete
+/api/notebooks/<notebook_pk>/pages/    # list/create pages
+/api/pages/<id>/                       # retrieve/update/delete page
+/api/pages/<id>/share/                 # POST create / DELETE revoke share link
+/api/shared/<token>/                   # public read-only (AllowAny)
 ```
 
-## CORS
+### Frontend (`frontend/src/`)
 
-Django CORS headers is installed. In dev, `CORS_ALLOW_ALL_ORIGINS = True`. The frontend Vite proxy is **not** used — CORS is enabled instead so the frontend talks directly to `:8000`.
+- `main.jsx` — wraps app in `AuthProvider`, `QueryClientProvider`, `BrowserRouter`
+- `App.jsx` — route definitions; `ProtectedRoute` redirects to `/login` if unauthenticated
+- `contexts/AuthContext.jsx` — global auth state; stores JWT access/refresh tokens in `localStorage`
+- `api/client.js` — Axios instance with interceptors: adds `Authorization: Bearer` header on every request; on 401, queues requests and attempts token refresh; on refresh failure, clears storage and redirects to `/login`
+- `api/auth.js`, `api/notebooks.js`, `api/pages.js` — thin API method modules
+- `components/PageEditor.jsx` — TipTap rich text editor with debounced auto-save via React Query mutation
+- `components/ShareModal.jsx` — creates/revokes `ShareLink`; parent invalidates queries on close
+
+**Data flow:** Vite proxies `/api/*` → `http://localhost:8000` in dev. React Query manages server state with keys like `['notebook', id]` and `['page', id]`; mutations invalidate relevant queries on success.
+
+### Ownership & Permissions
+
+Object-level ownership is enforced on every mutating endpoint. There is no concept of shared write access — a user can only modify their own notebooks and pages.
+
+| Permission class | Check | Applied to |
+|---|---|---|
+| `IsNotebookOwner` | `obj.user == request.user` | `NotebookDetailView` (retrieve/update/delete a notebook) |
+| `IsPageOwner` | `obj.notebook.user == request.user` | `PageDetailView` (retrieve/update/delete a page) |
+
+List endpoints (`NotebookListCreateView`, `PageListCreateView`) do not use object-level permissions; instead they filter `queryset` to `request.user` so a user never sees another user's notebooks or pages. The share endpoint (`/api/shared/<token>/`) bypasses auth entirely with `AllowAny`.
+
+When adding new models or views, follow the same pattern: either attach an object-level permission class that traverses FKs back to `User`, or filter the queryset in `get_queryset`.
+
+### Auto-Save
+
+The editor auto-saves on a **1-second debounce** while the user types.
+
+Flow in `PageEditor.jsx`:
+1. TipTap `onUpdate` fires on every keystroke → `clearTimeout` + `setTimeout(..., 1000)`
+2. After 1s of idle input, `save()` callback reads `editor.getJSON()` and calls `updatePage(page.id, { content })`
+3. `updatePage` sends a `PATCH /api/pages/<id>/` with the JSON content object
+4. `AutoSaveIndicator` renders transient status: `saving` → `saved` (green, 2s) → `null`
+
+**Important conventions:**
+- Content is stored as **TipTap JSON**, not HTML or plain text. Do not change the storage format without updating the serializer and model.
+- The debounce timer is cleared on unmount (`useEffect` cleanup) to prevent state updates after the component is gone.
+- When the active `page.id` changes, `PageEditor` uses `editor.commands.setContent(newContent, false)` to swap the editor document without triggering a new save cycle.
+- Save failures show `error` state in the indicator but do not block editing.
+
+### Auth Flow
+
+1. Login/register → backend returns `{access, refresh, user}`; stored in `localStorage`
+2. All requests include `Authorization: Bearer {access}` via Axios request interceptor
+3. On 401: interceptor POSTs to `/api/auth/token/refresh/`; backend rotates both tokens (`ROTATE_REFRESH_TOKENS=True`); queued requests retry with new token
+4. On refresh failure: logout, redirect to `/login`

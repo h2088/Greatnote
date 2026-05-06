@@ -1,157 +1,225 @@
-import { useMemo, useState } from 'react'
+import { useState, useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { getNotebooks, getNotebook, createNotebook, deleteNotebook, updateNotebook } from '../api/notebooks'
+import { createPage, deletePage } from '../api/pages'
+import { useAuth } from '../contexts/AuthContext'
 
-function BookSection({ book, isExpanded, onToggle, selectedPageId, onSelectPage, onDeletePage, onDeleteBook, onUpdateBook, onToggleFavorite }) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [editTitle, setEditTitle] = useState(book.title)
+export default function Sidebar({ activeNotebookId, activePageId, onSelectPage }) {
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
-  const handleDoubleClick = () => {
-    setIsEditing(true)
-    setEditTitle(book.title)
-  }
+  const [editingNotebook, setEditingNotebook] = useState(null)
+  const [newNotebookTitle, setNewNotebookTitle] = useState('')
+  const [query, setQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
 
-  const handleSave = () => {
-    setIsEditing(false)
-    if (editTitle.trim() && editTitle !== book.title) {
-      onUpdateBook(book.id, editTitle.trim())
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 250)
+    return () => clearTimeout(timer)
+  }, [query])
+
+  const { data: notebooks = [] } = useQuery({
+    queryKey: ['notebooks', debouncedQuery],
+    queryFn: () => getNotebooks(debouncedQuery ? { search: debouncedQuery } : undefined).then((r) => r.data),
+  })
+
+  const createNotebookMutation = useMutation({
+    mutationFn: () => createNotebook({ title: 'New Notebook' }),
+    onSuccess: ({ data }) => {
+      queryClient.invalidateQueries({ queryKey: ['notebooks'] })
+      navigate(`/notebooks/${data.id}`)
+    },
+  })
+
+  const deleteNotebookMutation = useMutation({
+    mutationFn: (id) => deleteNotebook(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notebooks'] })
+      navigate('/')
+    },
+  })
+
+  const renameNotebookMutation = useMutation({
+    mutationFn: ({ id, title }) => updateNotebook(id, { title }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notebooks'] }),
+  })
+
+  const createPageMutation = useMutation({
+    mutationFn: (notebookId) => createPage(notebookId, { title: 'Untitled' }),
+    onSuccess: ({ data }, notebookId) => {
+      queryClient.invalidateQueries({ queryKey: ['notebook', notebookId] })
+      onSelectPage(data.id)
+    },
+  })
+
+  const deletePageMutation = useMutation({
+    mutationFn: (id) => deletePage(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notebook', activeNotebookId] })
+      onSelectPage(null)
+    },
+  })
+
+  const activeNotebook = notebooks.find((n) => n.id === Number(activeNotebookId))
+
+  const { data: notebookDetail } = useQuery({
+    queryKey: ['notebook', activeNotebookId],
+    queryFn: () => getNotebook(activeNotebookId).then((r) => r.data),
+    enabled: !!activeNotebookId,
+  })
+
+  const pages = (notebookDetail?.pages ?? []).filter(
+    (pg) => !debouncedQuery || pg.title.toLowerCase().includes(debouncedQuery.toLowerCase())
+  )
+
+  const handleRenameNotebook = (nb) => {
+    if (newNotebookTitle.trim() && newNotebookTitle !== nb.title) {
+      renameNotebookMutation.mutate({ id: nb.id, title: newNotebookTitle.trim() })
     }
-  }
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      handleSave()
-    } else if (e.key === 'Escape') {
-      setIsEditing(false)
-      setEditTitle(book.title)
-    }
+    setEditingNotebook(null)
   }
 
   return (
-    <div className="book-section">
-      <div className="book-header" onClick={onToggle}>
-        <span className={`book-chevron ${isExpanded ? 'expanded' : ''}`}>▶</span>
-        {isEditing ? (
-          <input
-            className="book-title-input-inline"
-            value={editTitle}
-            onChange={(e) => setEditTitle(e.target.value)}
-            onBlur={handleSave}
-            onKeyDown={handleKeyDown}
-            autoFocus
-            onClick={(e) => e.stopPropagation()}
-          />
-        ) : (
-          <span className="book-title" onDoubleClick={handleDoubleClick}>{book.title}</span>
+    <aside className="w-64 bg-gray-900 text-gray-200 flex flex-col h-screen flex-shrink-0">
+      <div className="px-4 py-4 border-b border-gray-700">
+        <span className="text-white font-semibold text-lg">Greatnotes</span>
+        <p className="text-gray-400 text-xs mt-0.5 truncate">{user?.username}</p>
+      </div>
+
+      <div className="px-3 py-2 border-b border-gray-700">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search notebooks..."
+          className="w-full bg-gray-800 text-gray-200 text-sm rounded-lg px-3 py-1.5 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        />
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        <div className="px-3 pt-3 pb-1">
+          <button
+            onClick={() => createNotebookMutation.mutate()}
+            className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
+          >
+            <span className="text-lg leading-none">+</span> New notebook
+          </button>
+        </div>
+
+        {notebooks.length === 0 && debouncedQuery && (
+          <p className="px-4 py-3 text-xs text-gray-500">No notebooks found.</p>
         )}
+
+        {notebooks.map((nb) => (
+          <div key={nb.id}>
+            <div
+              className={`flex items-center group px-3 py-0.5 mx-1 rounded-lg cursor-pointer ${
+                nb.id === Number(activeNotebookId)
+                  ? 'bg-gray-700 text-white'
+                  : 'hover:bg-gray-800 text-gray-300'
+              }`}
+            >
+              {editingNotebook === nb.id ? (
+                <input
+                  autoFocus
+                  value={newNotebookTitle}
+                  onChange={(e) => setNewNotebookTitle(e.target.value)}
+                  onBlur={() => handleRenameNotebook(nb)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleRenameNotebook(nb)
+                    if (e.key === 'Escape') setEditingNotebook(null)
+                  }}
+                  className="flex-1 bg-transparent text-sm outline-none py-1.5"
+                />
+              ) : (
+                <Link
+                  to={`/notebooks/${nb.id}`}
+                  className="flex-1 text-sm py-1.5 truncate"
+                >
+                  {nb.title}
+                </Link>
+              )}
+
+              <div className="hidden group-hover:flex items-center gap-1 ml-1">
+                <button
+                  title="Rename"
+                  onClick={() => { setEditingNotebook(nb.id); setNewNotebookTitle(nb.title) }}
+                  className="p-1 text-gray-500 hover:text-gray-200"
+                >
+                  ✎
+                </button>
+                <button
+                  title="Delete"
+                  onClick={() => {
+                    if (confirm(`Delete "${nb.title}"?`)) deleteNotebookMutation.mutate(nb.id)
+                  }}
+                  className="p-1 text-gray-500 hover:text-red-400"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {nb.id === Number(activeNotebookId) && (
+              <div className="ml-4 mt-1 mb-2 border-l border-gray-700 pl-3">
+                {pages.map((pg) => (
+                  <PageItem
+                    key={pg.id}
+                    page={pg}
+                    active={pg.id === activePageId}
+                    onSelect={() => onSelectPage(pg.id)}
+                    onDelete={() => {
+                      if (confirm(`Delete "${pg.title}"?`)) deletePageMutation.mutate(pg.id)
+                    }}
+                  />
+                ))}
+                <button
+                  onClick={() => createPageMutation.mutate(nb.id)}
+                  className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 py-1 mt-1"
+                >
+                  <span>+</span> New page
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="px-4 py-3 border-t border-gray-700">
         <button
-          className="book-delete"
-          onClick={(e) => {
-            e.stopPropagation()
-            if (window.confirm('Delete this book and all its pages?')) {
-              onDeleteBook(book.id)
-            }
-          }}
+          onClick={logout}
+          title="Sign out"
+          className="text-gray-500 hover:text-gray-300"
         >
-          ×
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
         </button>
       </div>
-      {isExpanded && (
-        <div className="page-list">
-          {book.pages?.map(page => (
-            <div
-              key={page.id}
-              className={`page-item ${page.id === selectedPageId ? 'selected' : ''}`}
-              onClick={() => onSelectPage(page.id)}
-            >
-              <button
-                className={`page-star ${page.is_favorite ? 'favorited' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onToggleFavorite(page.id)
-                }}
-              >
-                {page.is_favorite ? '★' : '☆'}
-              </button>
-              <span className="page-title">{page.title || 'Untitled'}</span>
-              <button
-                className="page-delete"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (window.confirm('Delete this page?')) {
-                    onDeletePage(page.id)
-                  }
-                }}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-          {(!book.pages || book.pages.length === 0) && (
-            <div className="empty-pages">No pages yet</div>
-          )}
-        </div>
-      )}
-    </div>
+    </aside>
   )
 }
 
-export default function Sidebar({ books, selectedPageId, selectedBookId, onSelectPage, onDeletePage, onDeleteBook, onUpdateBook, onCreateBook, onCreatePage, onToggleBook, onToggleFavorite }) {
-  const [search, setSearch] = useState('')
-
-  const filteredBooks = useMemo(() => {
-    if (!search.trim()) return books
-    const term = search.toLowerCase()
-    return books
-      .map(book => {
-        const matchingPages = (book.pages || []).filter(p =>
-          p.title.toLowerCase().includes(term) ||
-          p.content.toLowerCase().includes(term)
-        )
-        const titleMatches = book.title.toLowerCase().includes(term)
-        return {
-          ...book,
-          pages: matchingPages,
-          _matchesSearch: matchingPages.length > 0 || titleMatches,
-        }
-      })
-      .filter(book => book._matchesSearch)
-  }, [books, search])
-
+function PageItem({ page, active, onSelect, onDelete }) {
   return (
-    <div className="sidebar">
-      <div className="sidebar-header">
-        <input
-          type="text"
-          className="search-input"
-          placeholder="Search..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </div>
-      <div className="sidebar-actions">
-        <button className="action-btn" onClick={onCreateBook}>+ New Book</button>
-        <button className="action-btn" onClick={onCreatePage} disabled={!selectedBookId}>
-          + New Page
-        </button>
-      </div>
-      <div className="sidebar-content">
-        {filteredBooks.map(book => (
-          <BookSection
-            key={book.id}
-            book={book}
-            isExpanded={selectedBookId === book.id}
-            onToggle={() => onToggleBook(book.id)}
-            selectedPageId={selectedPageId}
-            onSelectPage={onSelectPage}
-            onDeletePage={onDeletePage}
-            onDeleteBook={onDeleteBook}
-            onUpdateBook={onUpdateBook}
-            onToggleFavorite={onToggleFavorite}
-          />
-        ))}
-        {filteredBooks.length === 0 && (
-          <div className="empty-state">No books found</div>
-        )}
-      </div>
+    <div
+      className={`flex items-center group rounded px-2 py-1 cursor-pointer text-sm ${
+        active ? 'text-white bg-gray-700' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
+      }`}
+      onClick={onSelect}
+    >
+      <span className="flex-1 truncate">{page.title || 'Untitled'}</span>
+      <button
+        onClick={(e) => { e.stopPropagation(); onDelete() }}
+        className="hidden group-hover:block p-0.5 text-gray-600 hover:text-red-400"
+        title="Delete page"
+      >
+        ✕
+      </button>
     </div>
   )
 }

@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python /d/5-ai-course-example-main/ai_agent/notebook_agent/.claude/hooks/protect_sqlite.py"
+          }
+        ]
+      }
+    ]
+  }
+}
