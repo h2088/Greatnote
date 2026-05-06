@@ -32,6 +32,18 @@ class Page(models.Model):
         return self.title
 
 
+class PageUserShare(models.Model):
+    page = models.ForeignKey(Page, on_delete=models.CASCADE, related_name="user_shares")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="shared_pages")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['page', 'user']
+
+    def __str__(self):
+        return f"PageShare({self.page.title}, {self.user.username})"
+
+
 class ShareLink(models.Model):
     page = models.ForeignKey(Page, on_delete=models.CASCADE, related_name="share_links")
     token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)

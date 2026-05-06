@@ -153,6 +153,15 @@ export default function Sidebar({ activeNotebookId, activePageId, onSelectPage }
           </button>
         </div>
 
+        <div className="px-3 pb-1">
+          <Link
+            to="/shared-with-me"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
+          >
+            <span className="text-lg leading-none">🔗</span> Shared with me
+          </Link>
+        </div>
+
         {notebooks.length === 0 && debouncedQuery && (
           <p className="px-4 py-3 text-xs text-gray-500">No notebooks found.</p>
         )}
