@@ -15,6 +15,7 @@ from .serializers import (
     NotebookSerializer,
     NotebookListSerializer,
     PageSerializer,
+    PageListSerializer,
     SharedPageSerializer,
 )
 
@@ -93,6 +94,14 @@ class PageDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return Page.objects.filter(notebook__user=self.request.user)
+
+
+class FavoritePageListView(generics.ListAPIView):
+    serializer_class = PageListSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Page.objects.filter(notebook__user=self.request.user, is_favorite=True).order_by("-updated_at")
 
 
 # ── Share ─────────────────────────────────────────────────────────────────────

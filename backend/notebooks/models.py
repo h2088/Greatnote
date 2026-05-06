@@ -21,6 +21,7 @@ class Page(models.Model):
     title = models.CharField(max_length=255, default="Untitled")
     content = models.JSONField(default=dict)
     order = models.PositiveIntegerField(default=0)
+    is_favorite = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

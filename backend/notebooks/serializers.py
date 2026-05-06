@@ -31,7 +31,7 @@ class PageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Page
-        fields = ["id", "notebook", "title", "content", "order", "created_at", "updated_at", "share_token"]
+        fields = ["id", "notebook", "title", "content", "order", "is_favorite", "created_at", "updated_at", "share_token"]
         read_only_fields = ["id", "notebook", "created_at", "updated_at", "share_token"]
 
     def get_share_token(self, obj):
@@ -45,7 +45,8 @@ class PageListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Page
-        fields = ["id", "title", "order", "updated_at", "share_token"]
+        fields = ["id", "notebook", "title", "order", "is_favorite", "updated_at", "share_token"]
+        read_only_fields = ["notebook"]
 
     def get_share_token(self, obj):
         link = obj.share_links.filter(is_active=True).first()

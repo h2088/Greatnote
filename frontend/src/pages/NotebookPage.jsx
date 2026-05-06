@@ -1,16 +1,20 @@
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getNotebook, updateNotebook } from '../api/notebooks'
-import { getPage, updatePage } from '../api/pages'
+import { getPage, updatePage, toggleFavoritePage } from '../api/pages'
 import Sidebar from '../components/Sidebar'
 import PageEditor from '../components/PageEditor'
 import ShareModal from '../components/ShareModal'
 
 export default function NotebookPage() {
   const { id: notebookId } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
-  const [activePageId, setActivePageId] = useState(null)
+  const [activePageId, setActivePageId] = useState(() => {
+    const pageParam = searchParams.get('page')
+    return pageParam ? Number(pageParam) : null
+  })
   const [showShare, setShowShare] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleInput, setTitleInput] = useState('')
@@ -25,6 +29,12 @@ export default function NotebookPage() {
     queryFn: () => getPage(activePageId).then((r) => r.data),
     enabled: !!activePageId,
   })
+
+  useEffect(() => {
+    if (searchParams.get('page')) {
+      setSearchParams({}, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
 
   useEffect(() => {
     if (notebook?.pages?.length > 0 && !activePageId) {
@@ -49,6 +59,15 @@ export default function NotebookPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notebook', notebookId] })
       queryClient.invalidateQueries({ queryKey: ['page', activePageId] })
+    },
+  })
+
+  const toggleFavoriteMutation = useMutation({
+    mutationFn: ({ id, isFavorite }) => toggleFavoritePage(id, isFavorite),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['favorite-pages'] })
+      queryClient.invalidateQueries({ queryKey: ['page', activePageId] })
+      queryClient.invalidateQueries({ queryKey: ['notebook', notebookId] })
     },
   })
 
@@ -105,6 +124,25 @@ export default function NotebookPage() {
                 className="text-sm font-semibold text-gray-800 outline-none border-b border-transparent focus:border-indigo-400 px-1"
               />
               <div className="ml-auto flex items-center gap-2">
+                <button
+                  onClick={() => toggleFavoriteMutation.mutate({ id: activePage.id, isFavorite: !activePage.is_favorite })}
+                  className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg transition-colors ${
+                    activePage.is_favorite
+                      ? 'text-yellow-500 hover:text-yellow-600 hover:bg-yellow-50'
+                      : 'text-gray-400 hover:text-yellow-500 hover:bg-gray-50'
+                  }`}
+                  title={activePage.is_favorite ? 'Unfavorite' : 'Favorite'}
+                >
+                  {activePage.is_favorite ? (
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                    </svg>
+                  )}
+                </button>
                 <button
                   onClick={() => setShowShare(true)}
                   className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-indigo-600 px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition-colors"

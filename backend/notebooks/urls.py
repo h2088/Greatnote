@@ -17,6 +17,7 @@ urlpatterns = [
     path("notebooks/<int:notebook_pk>/pages/", views.PageListCreateView.as_view(), name="page-list"),
 
     # Pages (standalone)
+    path("pages/favorites/", views.FavoritePageListView.as_view(), name="favorite-pages"),
     path("pages/<int:pk>/", views.PageDetailView.as_view(), name="page-detail"),
     path("pages/<int:pk>/share/", views.page_share, name="page-share"),
 

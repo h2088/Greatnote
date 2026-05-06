@@ -306,3 +306,62 @@ class ShareLinkTests(APITestCase):
         self.client.delete(f'/api/pages/{self.page.id}/share/')
         response = self.client.get(f'/api/pages/{self.page.id}/')
         self.assertIsNone(response.data['share_token'])
+
+
+class FavoritePageTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='user1', password='password123')
+        self.other = User.objects.create_user(username='user2', password='password123')
+        self.notebook = Notebook.objects.create(user=self.user, title='My Notebook')
+        self.other_notebook = Notebook.objects.create(user=self.other, title='Other Notebook')
+        self.page = Page.objects.create(notebook=self.notebook, title='Page 1')
+        self.fav_page = Page.objects.create(notebook=self.notebook, title='Fav Page', is_favorite=True)
+        self.other_page = Page.objects.create(notebook=self.other_notebook, title='Other Fav', is_favorite=True)
+
+    def test_favorite_page_toggle(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.patch(f'/api/pages/{self.page.id}/', {'is_favorite': True}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['is_favorite'])
+        self.page.refresh_from_db()
+        self.assertTrue(self.page.is_favorite)
+
+    def test_unfavorite_page(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.patch(f'/api/pages/{self.fav_page.id}/', {'is_favorite': False}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['is_favorite'])
+        self.fav_page.refresh_from_db()
+        self.assertFalse(self.fav_page.is_favorite)
+
+    def test_favorite_pages_list_returns_only_own_favorites(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get('/api/pages/favorites/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['title'], 'Fav Page')
+
+    def test_favorite_pages_list_excludes_unfavorited(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get('/api/pages/favorites/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        titles = [p['title'] for p in response.data]
+        self.assertNotIn('Page 1', titles)
+
+    def test_favorite_pages_list_unauthenticated_returns_401(self):
+        response = self.client.get('/api/pages/favorites/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_cannot_see_other_users_favorites(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get('/api/pages/favorites/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        titles = [p['title'] for p in response.data]
+        self.assertNotIn('Other Fav', titles)
+
+    def test_favorite_toggle_in_page_list_serializer(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(f'/api/notebooks/{self.notebook.id}/')
+        pages = response.data['pages']
+        fav = next(p for p in pages if p['title'] == 'Fav Page')
+        self.assertTrue(fav['is_favorite'])
