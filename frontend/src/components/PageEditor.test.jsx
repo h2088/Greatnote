@@ -20,6 +20,10 @@ vi.mock('@tiptap/react', () => ({
   EditorContent: () => null,
 }))
 
+vi.mock('@tiptap/react/menus', () => ({
+  BubbleMenu: () => null,
+}))
+
 vi.mock('@tiptap/starter-kit', () => ({ default: {} }))
 vi.mock('@tiptap/extension-placeholder', () => ({
   default: { configure: () => ({}) },
