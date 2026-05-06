@@ -20,7 +20,9 @@
       "Bash(mv notebook_app_by_cc/backend ./backend)",
       "Bash(mv notebook_app_by_cc/frontend ./frontend)",
       "Bash(mv notebook_app_by_cc/CLAUDE.md ./CLAUDE.md)",
-      "Bash(mv notebook_app_by_cc/README.md ./README.md)"
+      "Bash(mv notebook_app_by_cc/README.md ./README.md)",
+      "Bash(npx vitest *)",
+      "Bash(./node_modules/.bin/eslint src/pages/NotebookPage.jsx)"
     ]
   }
 }
