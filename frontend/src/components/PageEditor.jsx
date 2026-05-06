@@ -26,6 +26,7 @@ export default function PageEditor({ page }) {
   const [wordCount, setWordCount] = useState(0)
   const [charCount, setCharCount] = useState(0)
   const saveTimer = useRef(null)
+  const pendingContent = useRef(null)
 
   const save = useCallback(
     async (content) => {
@@ -41,6 +42,23 @@ export default function PageEditor({ page }) {
     [page.id]
   )
 
+  const flushPendingSave = useCallback(() => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current)
+      saveTimer.current = null
+    }
+    if (pendingContent.current !== null) {
+      const content = pendingContent.current
+      pendingContent.current = null
+      save(content)
+    }
+  }, [save])
+
+  // Cleanup runs on unmount AND when `save` changes (i.e., page.id swap on the same instance).
+  // Because the cleanup closes over the *previous* flushPendingSave (whose `save` targets the
+  // previous page.id), in-place page swaps still PATCH the correct page.
+  useEffect(() => () => flushPendingSave(), [flushPendingSave])
+
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -52,9 +70,13 @@ export default function PageEditor({ page }) {
       const words = text.trim() === '' ? 0 : text.trim().split(/\s+/).length
       setWordCount(words)
       setCharCount(text.length)
-      clearTimeout(saveTimer.current)
+      pendingContent.current = editor.getJSON()
+      if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(() => {
-        save(editor.getJSON())
+        saveTimer.current = null
+        const content = pendingContent.current
+        pendingContent.current = null
+        save(content)
       }, 1000)
     },
   })
@@ -76,8 +98,6 @@ export default function PageEditor({ page }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page.id])
-
-  useEffect(() => () => clearTimeout(saveTimer.current), [])
 
   return (
     <div className="flex flex-col h-full">
