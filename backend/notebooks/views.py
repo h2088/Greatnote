@@ -1,3 +1,4 @@
+from django.db import models
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
 from rest_framework import generics, status
@@ -7,15 +8,17 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Notebook, Page, ShareLink
-from .permissions import IsNotebookOwner, IsPageOwner
+from .models import Notebook, Page, PageUserShare, ShareLink
+from .permissions import IsNotebookOwner, IsPageOwner, CanAccessPage
 from .serializers import (
     RegisterSerializer,
     UserSerializer,
     NotebookSerializer,
     NotebookListSerializer,
     PageSerializer,
+    PageUserShareSerializer,
     SharedPageSerializer,
+    SharedWithMeSerializer,
 )
 
 
@@ -89,10 +92,13 @@ class PageListCreateView(generics.ListCreateAPIView):
 
 class PageDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = PageSerializer
-    permission_classes = [IsAuthenticated, IsPageOwner]
+    permission_classes = [IsAuthenticated, CanAccessPage]
 
     def get_queryset(self):
-        return Page.objects.filter(notebook__user=self.request.user)
+        return Page.objects.filter(
+            models.Q(notebook__user=self.request.user) |
+            models.Q(user_shares__user=self.request.user)
+        ).distinct()
 
 
 # ── Share ─────────────────────────────────────────────────────────────────────
@@ -109,6 +115,48 @@ def page_share(request, pk):
     # DELETE — revoke all active links
     ShareLink.objects.filter(page=page, is_active=True).update(is_active=False)
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def page_share_users(request, pk):
+    page = get_object_or_404(Page, pk=pk, notebook__user=request.user)
+
+    if request.method == "GET":
+        shares = page.user_shares.select_related('user').all()
+        serializer = PageUserShareSerializer(shares, many=True)
+        return Response(serializer.data)
+
+    # POST — share with a user by username
+    username = request.data.get('username')
+    if not username:
+        return Response({"detail": "username is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    target_user = get_object_or_404(User, username=username)
+
+    if target_user == request.user:
+        return Response({"detail": "Cannot share with yourself"}, status=status.HTTP_400_BAD_REQUEST)
+
+    share, created = PageUserShare.objects.get_or_create(page=page, user=target_user)
+    serializer = PageUserShareSerializer(share)
+    return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def page_share_user_revoke(request, pk, user_id):
+    page = get_object_or_404(Page, pk=pk, notebook__user=request.user)
+    share = get_object_or_404(PageUserShare, page=page, user_id=user_id)
+    share.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def shared_with_me(request):
+    pages = Page.objects.filter(user_shares__user=request.user).distinct()
+    serializer = SharedWithMeSerializer(pages, many=True, context={'request': request})
+    return Response(serializer.data)
 
 
 @api_view(["GET"])

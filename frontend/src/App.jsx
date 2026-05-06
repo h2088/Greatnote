@@ -5,6 +5,7 @@ import RegisterPage from './pages/RegisterPage'
 import DashboardPage from './pages/DashboardPage'
 import NotebookPage from './pages/NotebookPage'
 import SharedPageView from './pages/SharedPageView'
+import SharedWithMePage from './pages/SharedWithMePage'
 
 export default function App() {
   return (
@@ -12,6 +13,14 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/shared/:token" element={<SharedPageView />} />
+      <Route
+        path="/shared-with-me"
+        element={
+          <ProtectedRoute>
+            <SharedWithMePage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/"
         element={

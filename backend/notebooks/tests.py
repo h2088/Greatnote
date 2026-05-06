@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Notebook, Page, ShareLink
+from .models import Notebook, Page, PageUserShare, ShareLink
 
 
 class AuthTests(APITestCase):
@@ -306,3 +306,183 @@ class ShareLinkTests(APITestCase):
         self.client.delete(f'/api/pages/{self.page.id}/share/')
         response = self.client.get(f'/api/pages/{self.page.id}/')
         self.assertIsNone(response.data['share_token'])
+
+
+class PageUserShareTests(APITestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(username='owner', password='password123')
+        self.shared_user = User.objects.create_user(username='shared', password='password123')
+        self.other = User.objects.create_user(username='other', password='password123')
+        self.notebook = Notebook.objects.create(user=self.owner, title='My Notebook')
+        self.page = Page.objects.create(notebook=self.notebook, title='My Page')
+
+    def test_share_page_with_specific_user(self):
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.post(
+            f'/api/pages/{self.page.id}/share/users/',
+            {'username': 'shared'}
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(PageUserShare.objects.filter(page=self.page, user=self.shared_user).exists())
+
+    def test_shared_user_can_read_page(self):
+        PageUserShare.objects.create(page=self.page, user=self.shared_user)
+        self.client.force_authenticate(user=self.shared_user)
+        response = self.client.get(f'/api/pages/{self.page.id}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['title'], 'My Page')
+
+    def test_shared_user_cannot_update_page(self):
+        PageUserShare.objects.create(page=self.page, user=self.shared_user)
+        self.client.force_authenticate(user=self.shared_user)
+        response = self.client.patch(
+            f'/api/pages/{self.page.id}/',
+            {'title': 'Hacked'},
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.page.refresh_from_db()
+        self.assertEqual(self.page.title, 'My Page')
+
+    def test_shared_user_cannot_delete_page(self):
+        PageUserShare.objects.create(page=self.page, user=self.shared_user)
+        self.client.force_authenticate(user=self.shared_user)
+        response = self.client.delete(f'/api/pages/{self.page.id}/')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(Page.objects.filter(id=self.page.id).exists())
+
+    def test_non_shared_user_cannot_access_page(self):
+        self.client.force_authenticate(user=self.other)
+        response = self.client.get(f'/api/pages/{self.page.id}/')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_revoke_user_share(self):
+        PageUserShare.objects.create(page=self.page, user=self.shared_user)
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.delete(
+            f'/api/pages/{self.page.id}/share/users/{self.shared_user.id}/'
+        )
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(PageUserShare.objects.filter(page=self.page, user=self.shared_user).exists())
+
+    def test_revoked_user_loses_access(self):
+        PageUserShare.objects.create(page=self.page, user=self.shared_user)
+        self.client.force_authenticate(user=self.owner)
+        self.client.delete(f'/api/pages/{self.page.id}/share/users/{self.shared_user.id}/')
+
+        self.client.force_authenticate(user=self.shared_user)
+        response = self.client.get(f'/api/pages/{self.page.id}/')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_owner_retains_full_access_after_sharing(self):
+        PageUserShare.objects.create(page=self.page, user=self.shared_user)
+        self.client.force_authenticate(user=self.owner)
+
+        response = self.client.get(f'/api/pages/{self.page.id}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response = self.client.patch(
+            f'/api/pages/{self.page.id}/',
+            {'title': 'Updated'},
+            format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        response = self.client.delete(f'/api/pages/{self.page.id}/')
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_share_with_nonexistent_user_returns_404(self):
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.post(
+            f'/api/pages/{self.page.id}/share/users/',
+            {'username': 'doesnotexist'}
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_share_with_self_returns_400(self):
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.post(
+            f'/api/pages/{self.page.id}/share/users/',
+            {'username': 'owner'}
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_share_without_username_returns_400(self):
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.post(f'/api/pages/{self.page.id}/share/users/', {})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_duplicate_share_is_idempotent(self):
+        self.client.force_authenticate(user=self.owner)
+        r1 = self.client.post(
+            f'/api/pages/{self.page.id}/share/users/',
+            {'username': 'shared'}
+        )
+        r2 = self.client.post(
+            f'/api/pages/{self.page.id}/share/users/',
+            {'username': 'shared'}
+        )
+        self.assertEqual(r1.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(r2.status_code, status.HTTP_200_OK)
+        self.assertEqual(PageUserShare.objects.filter(page=self.page, user=self.shared_user).count(), 1)
+
+    def test_non_owner_cannot_share_page(self):
+        self.client.force_authenticate(user=self.other)
+        response = self.client.post(
+            f'/api/pages/{self.page.id}/share/users/',
+            {'username': 'shared'}
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_non_owner_cannot_revoke_share(self):
+        PageUserShare.objects.create(page=self.page, user=self.shared_user)
+        self.client.force_authenticate(user=self.other)
+        response = self.client.delete(
+            f'/api/pages/{self.page.id}/share/users/{self.shared_user.id}/'
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_list_shared_users(self):
+        PageUserShare.objects.create(page=self.page, user=self.shared_user)
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.get(f'/api/pages/{self.page.id}/share/users/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['user']['username'], 'shared')
+
+    def test_shared_with_me_returns_only_shared_pages(self):
+        PageUserShare.objects.create(page=self.page, user=self.shared_user)
+        other_notebook = Notebook.objects.create(user=self.owner, title='Other')
+        other_page = Page.objects.create(notebook=other_notebook, title='Other Page')
+        # Do NOT share other_page
+
+        self.client.force_authenticate(user=self.shared_user)
+        response = self.client.get('/api/shared-with-me/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['title'], 'My Page')
+        self.assertEqual(response.data[0]['owner'], 'owner')
+
+    def test_shared_users_field_only_visible_to_owner(self):
+        PageUserShare.objects.create(page=self.page, user=self.shared_user)
+
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.get(f'/api/pages/{self.page.id}/')
+        self.assertEqual(len(response.data['shared_users']), 1)
+
+        self.client.force_authenticate(user=self.shared_user)
+        response = self.client.get(f'/api/pages/{self.page.id}/')
+        self.assertEqual(len(response.data['shared_users']), 0)
+
+    def test_public_shared_page_still_works(self):
+        link = ShareLink.objects.create(page=self.page, is_active=True)
+        response = self.client.get(f'/api/shared/{link.token}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['title'], 'My Page')
+
+    def test_revoked_public_link_returns_404(self):
+        link = ShareLink.objects.create(page=self.page, is_active=True)
+        self.client.force_authenticate(user=self.owner)
+        self.client.delete(f'/api/pages/{self.page.id}/share/')
+        response = self.client.get(f'/api/shared/{link.token}/')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

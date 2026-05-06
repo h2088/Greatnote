@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User
 from rest_framework import serializers
-from .models import Notebook, Page, ShareLink
+from .models import Notebook, Page, PageUserShare, ShareLink
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -26,17 +26,34 @@ class ShareLinkSerializer(serializers.ModelSerializer):
         fields = ["token", "is_active", "created_at"]
 
 
+class PageUserShareSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+
+    class Meta:
+        model = PageUserShare
+        fields = ["id", "user", "created_at"]
+
+
 class PageSerializer(serializers.ModelSerializer):
     share_token = serializers.SerializerMethodField()
+    notebook_title = serializers.CharField(source="notebook.title", read_only=True)
+    shared_users = serializers.SerializerMethodField()
 
     class Meta:
         model = Page
-        fields = ["id", "notebook", "title", "content", "order", "created_at", "updated_at", "share_token"]
-        read_only_fields = ["id", "notebook", "created_at", "updated_at", "share_token"]
+        fields = ["id", "notebook", "title", "content", "order", "created_at", "updated_at", "share_token", "notebook_title", "shared_users"]
+        read_only_fields = ["id", "notebook", "created_at", "updated_at", "share_token", "notebook_title", "shared_users"]
 
     def get_share_token(self, obj):
         link = obj.share_links.filter(is_active=True).first()
         return str(link.token) if link else None
+
+    def get_shared_users(self, obj):
+        request = self.context.get('request')
+        if request and obj.notebook.user == request.user:
+            shares = obj.user_shares.select_related('user').all()
+            return PageUserShareSerializer(shares, many=True).data
+        return []
 
 
 class PageListSerializer(serializers.ModelSerializer):
@@ -75,3 +92,21 @@ class SharedPageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Page
         fields = ["id", "title", "content", "notebook_title", "updated_at"]
+
+
+class SharedWithMeSerializer(serializers.ModelSerializer):
+    notebook_title = serializers.CharField(source="notebook.title", read_only=True)
+    owner = serializers.CharField(source="notebook.user.username", read_only=True)
+    shared_at = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Page
+        fields = ["id", "title", "notebook_title", "owner", "updated_at", "shared_at"]
+
+    def get_shared_at(self, obj):
+        request = self.context.get('request')
+        if request:
+            share = obj.user_shares.filter(user=request.user).first()
+            if share:
+                return share.created_at
+        return None
