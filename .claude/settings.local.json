@@ -25,7 +25,8 @@
       "Bash(./node_modules/.bin/eslint src/pages/NotebookPage.jsx)",
       "Bash(npx eslint *)",
       "Bash(git stash *)",
-      "Bash(pip --version)"
+      "Bash(pip --version)",
+      "Bash(npm test *)"
     ]
   }
 }
