@@ -218,7 +218,7 @@ def ai_edit(request, pk):
     )
     try:
         response = client.chat.completions.create(
-            model="kimi-latest",
+            model="gpt-5.3-codex",
             messages=[
                 {"role": "system", "content": AI_EDIT_PROMPTS[action]},
                 {"role": "user", "content": text},

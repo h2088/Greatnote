@@ -186,7 +186,15 @@ export default function PageEditor({ page }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page.id])
 
-  const hasTextSelection = editor && !editor.state.selection.empty
+  const [hasTextSelection, setHasTextSelection] = useState(false)
+
+  useEffect(() => {
+    if (!editor) return
+    const update = () => setHasTextSelection(!editor.state.selection.empty)
+    editor.on('selectionUpdate', update)
+    update()
+    return () => { editor.off('selectionUpdate', update) }
+  }, [editor])
 
   return (
     <div className="flex flex-col h-full relative">
@@ -220,9 +228,18 @@ export default function PageEditor({ page }) {
             )
           )}
 
-          {hasTextSelection && (
+          <div className="w-px h-5 bg-gray-600 mx-0.5" />
+          <span
+            title={hasTextSelection ? 'AI editing options' : 'Select text to enable AI editing'}
+            className={`text-[10px] font-bold px-1 rounded ${
+              hasTextSelection ? 'text-emerald-400' : 'text-gray-500'
+            }`}
+          >
+            AI
+          </span>
+
+          {hasTextSelection ? (
             <>
-              <div className="w-px h-5 bg-gray-600 mx-0.5" />
               {AI_ACTIONS.map((btn) => (
                 <button
                   key={btn.action}
@@ -237,6 +254,8 @@ export default function PageEditor({ page }) {
                 </button>
               ))}
             </>
+          ) : (
+            <span className="text-[10px] text-gray-500 px-1">select text</span>
           )}
         </BubbleMenu>
       )}
