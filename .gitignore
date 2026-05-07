@@ -12,6 +12,8 @@ build/
 *.sqlite3
 *.log
 local_settings.py
+.env
+.vite/
 
 # Node
 node_modules/
