@@ -1,6 +1,8 @@
 import uuid
+from unittest.mock import patch, MagicMock
 
 from django.contrib.auth.models import User
+from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -545,3 +547,98 @@ class PageUserShareTests(APITestCase):
         self.client.delete(f'/api/pages/{self.page.id}/share/')
         response = self.client.get(f'/api/shared/{link.token}/')
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class AiEditTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='user1', password='password123')
+        self.other = User.objects.create_user(username='user2', password='password123')
+        self.notebook = Notebook.objects.create(user=self.user, title='My Notebook')
+        self.page = Page.objects.create(notebook=self.notebook, title='Page 1')
+
+    @override_settings(OPENAI_API_KEY='test-key')
+    @patch('notebooks.views.OpenAI')
+    def test_ai_edit_success(self, mock_openai_class):
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+        mock_choice = MagicMock()
+        mock_choice.message.content = '  Improved text  '
+        mock_client.chat.completions.create.return_value = MagicMock(
+            choices=[mock_choice]
+        )
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/pages/{self.page.id}/ai-edit/',
+            {'text': 'hello world', 'action': 'improve'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['text'], 'Improved text')
+        mock_client.chat.completions.create.assert_called_once()
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        self.assertEqual(call_kwargs['model'], 'gpt-4o-mini')
+        self.assertEqual(call_kwargs['messages'][0]['role'], 'system')
+        self.assertEqual(call_kwargs['messages'][1]['content'], 'hello world')
+
+    def test_ai_edit_unauthenticated_returns_401(self):
+        response = self.client.post(
+            f'/api/pages/{self.page.id}/ai-edit/',
+            {'text': 'hello', 'action': 'improve'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_ai_edit_other_users_page_returns_404(self):
+        other_notebook = Notebook.objects.create(user=self.other, title='Other')
+        other_page = Page.objects.create(notebook=other_notebook, title='Other Page')
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/pages/{other_page.id}/ai-edit/',
+            {'text': 'hello', 'action': 'improve'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_ai_edit_missing_text_returns_400(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/pages/{self.page.id}/ai-edit/',
+            {'action': 'improve'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_ai_edit_invalid_action_returns_400(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/pages/{self.page.id}/ai-edit/',
+            {'text': 'hello', 'action': 'invalid'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @override_settings(OPENAI_API_KEY='')
+    def test_ai_edit_no_api_key_returns_503(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/pages/{self.page.id}/ai-edit/',
+            {'text': 'hello', 'action': 'improve'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    @override_settings(OPENAI_API_KEY='test-key')
+    @patch('notebooks.views.OpenAI')
+    def test_ai_edit_openai_error_returns_502(self, mock_openai_class):
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = Exception('API Error')
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/pages/{self.page.id}/ai-edit/',
+            {'text': 'hello', 'action': 'improve'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)

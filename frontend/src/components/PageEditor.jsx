@@ -3,7 +3,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
-import { updatePage } from '../api/pages'
+import { updatePage, aiEditPage } from '../api/pages'
 import AutoSaveIndicator from './AutoSaveIndicator'
 
 const BUBBLE_BUTTONS = [
@@ -22,10 +22,20 @@ const BUBBLE_BUTTONS = [
   { label: '</>', title: 'Code block (Ctrl+Alt+C)', action: (e) => e.chain().focus().toggleCodeBlock().run(), active: (e) => e.isActive('codeBlock'), shortcut: 'Ctrl+Alt+C' },
 ]
 
+const AI_ACTIONS = [
+  { label: 'Improve', action: 'improve' },
+  { label: 'Shorter', action: 'shorter' },
+  { label: 'Longer', action: 'longer' },
+  { label: 'Fix Grammar', action: 'grammar' },
+  { label: 'Professional', action: 'professional' },
+  { label: 'Casual', action: 'casual' },
+]
+
 export default function PageEditor({ page }) {
   const [saveStatus, setSaveStatus] = useState(null)
   const [wordCount, setWordCount] = useState(0)
   const [charCount, setCharCount] = useState(0)
+  const [aiLoading, setAiLoading] = useState(false)
   const saveTimer = useRef(null)
   const pendingContent = useRef(null)
   const editorRef = useRef(null)
@@ -56,10 +66,31 @@ export default function PageEditor({ page }) {
     }
   }, [save])
 
-  // Cleanup runs on unmount AND when `save` changes (i.e., page.id swap on the same instance).
-  // Because the cleanup closes over the *previous* flushPendingSave (whose `save` targets the
-  // previous page.id), in-place page swaps still PATCH the correct page.
   useEffect(() => () => flushPendingSave(), [flushPendingSave])
+
+  const handleAiEdit = useCallback(
+    async (action) => {
+      const editor = editorRef.current
+      if (!editor || aiLoading) return
+
+      const { from, to } = editor.state.selection
+      if (from === to) return
+
+      const selectedText = editor.state.doc.textBetween(from, to)
+      if (!selectedText.trim()) return
+
+      setAiLoading(true)
+      try {
+        const { data } = await aiEditPage(page.id, selectedText, action)
+        editor.chain().focus().insertContentAt({ from, to }, data.text).run()
+      } catch {
+        // Error is silent; original text remains selected
+      } finally {
+        setAiLoading(false)
+      }
+    },
+    [page.id, aiLoading]
+  )
 
   const handleKeyDown = useCallback((_view, event) => {
     const editor = editorRef.current
@@ -155,6 +186,8 @@ export default function PageEditor({ page }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page.id])
 
+  const hasTextSelection = editor && !editor.state.selection.empty
+
   return (
     <div className="flex flex-col h-full relative">
       <div className="absolute top-3 right-4 z-10">
@@ -175,15 +208,35 @@ export default function PageEditor({ page }) {
                 key={btn.title}
                 title={btn.title}
                 onClick={() => btn.action(editor)}
+                disabled={aiLoading}
                 className={`px-2 py-1 rounded text-sm font-mono transition-colors ${
                   editor && btn.active(editor)
                     ? 'bg-indigo-500 text-white'
                     : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                }`}
+                } ${aiLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {btn.label}
               </button>
             )
+          )}
+
+          {hasTextSelection && (
+            <>
+              <div className="w-px h-5 bg-gray-600 mx-0.5" />
+              {AI_ACTIONS.map((btn) => (
+                <button
+                  key={btn.action}
+                  title={btn.label}
+                  onClick={() => handleAiEdit(btn.action)}
+                  disabled={aiLoading}
+                  className={`px-2 py-1 rounded text-xs font-medium transition-colors text-emerald-300 hover:bg-gray-700 hover:text-emerald-200 ${
+                    aiLoading ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                >
+                  {aiLoading ? '...' : btn.label}
+                </button>
+              ))}
+            </>
           )}
         </BubbleMenu>
       )}

@@ -22,6 +22,7 @@ urlpatterns = [
     path("pages/<int:pk>/share/", views.page_share, name="page-share"),
     path("pages/<int:pk>/share/users/", views.page_share_users, name="page-share-users"),
     path("pages/<int:pk>/share/users/<int:user_id>/", views.page_share_user_revoke, name="page-share-user-revoke"),
+    path("pages/<int:pk>/ai-edit/", views.ai_edit, name="page-ai-edit"),
 
     # Shared pages
     path("shared/<uuid:token>/", views.shared_page, name="shared-page"),

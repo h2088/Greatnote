@@ -1,6 +1,8 @@
+from django.conf import settings
 from django.db import models
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
+from openai import OpenAI
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.filters import SearchFilter
@@ -174,3 +176,57 @@ def shared_page(request, token):
     link = get_object_or_404(ShareLink, token=token, is_active=True)
     serializer = SharedPageSerializer(link.page)
     return Response(serializer.data)
+
+
+AI_EDIT_PROMPTS = {
+    "improve": "Improve the writing quality of the following text. Keep the meaning and tone. Return only the improved text, no explanations.",
+    "shorter": "Make the following text shorter and more concise. Preserve the key meaning. Return only the shortened text, no explanations.",
+    "longer": "Expand the following text with more detail and depth. Keep the same style. Return only the expanded text, no explanations.",
+    "grammar": "Fix grammar and spelling in the following text. Do not change the meaning or style. Return only the corrected text, no explanations.",
+    "professional": "Rewrite the following text in a professional, formal tone. Return only the rewritten text, no explanations.",
+    "casual": "Rewrite the following text in a casual, conversational tone. Return only the rewritten text, no explanations.",
+}
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def ai_edit(request, pk):
+    page = get_object_or_404(Page, pk=pk)
+    if page.notebook.user != request.user and not page.user_shares.filter(user=request.user).exists():
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    text = request.data.get("text", "").strip()
+    action = request.data.get("action", "").strip()
+
+    if not text:
+        return Response({"detail": "text is required"}, status=status.HTTP_400_BAD_REQUEST)
+    if action not in AI_EDIT_PROMPTS:
+        return Response(
+            {"detail": f"action must be one of: {', '.join(AI_EDIT_PROMPTS.keys())}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not settings.OPENAI_API_KEY:
+        return Response(
+            {"detail": "AI editing is not configured"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": AI_EDIT_PROMPTS[action]},
+                {"role": "user", "content": text},
+            ],
+            temperature=0.7,
+        )
+        transformed = response.choices[0].message.content.strip()
+    except Exception:
+        return Response(
+            {"detail": "AI transformation failed"},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    return Response({"text": transformed})

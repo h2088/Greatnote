@@ -8,6 +8,7 @@ const { mockEditor, capturedConfig } = vi.hoisted(() => ({
     getJSON: () => ({}),
     isActive: () => false,
     commands: { setContent: () => {} },
+    state: { selection: { empty: true, from: 0, to: 0 } },
   },
   capturedConfig: { current: null },
 }))
@@ -21,7 +22,7 @@ vi.mock('@tiptap/react', () => ({
 }))
 
 vi.mock('@tiptap/react/menus', () => ({
-  BubbleMenu: () => null,
+  BubbleMenu: ({ children }) => children,
 }))
 
 vi.mock('@tiptap/starter-kit', () => ({ default: {} }))
@@ -31,17 +32,20 @@ vi.mock('@tiptap/extension-placeholder', () => ({
 
 vi.mock('../api/pages', () => ({
   updatePage: vi.fn().mockResolvedValue({}),
+  aiEditPage: vi.fn().mockResolvedValue({ data: { text: 'AI result' } }),
 }))
 
 import PageEditor from './PageEditor'
-import { updatePage } from '../api/pages'
+import { updatePage, aiEditPage } from '../api/pages'
 
 describe('PageEditor word/character count', () => {
   beforeEach(() => {
     mockEditor.getText = () => ''
     mockEditor.getJSON = () => ({})
+    mockEditor.state.selection = { empty: true, from: 0, to: 0 }
     capturedConfig.current = null
     updatePage.mockClear()
+    aiEditPage.mockClear()
   })
 
   it('renders 0 words · 0 chars for an empty page', () => {
@@ -78,9 +82,12 @@ describe('PageEditor auto-save', () => {
     vi.useFakeTimers()
     mockEditor.getText = () => ''
     mockEditor.getJSON = () => ({})
+    mockEditor.state.selection = { empty: true, from: 0, to: 0 }
     capturedConfig.current = null
     updatePage.mockReset()
     updatePage.mockResolvedValue({})
+    aiEditPage.mockReset()
+    aiEditPage.mockResolvedValue({ data: { text: 'AI result' } })
   })
 
   afterEach(() => {
@@ -214,5 +221,53 @@ describe('PageEditor auto-save', () => {
     expect(updatePage).not.toHaveBeenCalled()
     act(() => { unmount() })
     expect(updatePage).not.toHaveBeenCalled()
+  })
+})
+
+describe('PageEditor AI editing', () => {
+  beforeEach(() => {
+    mockEditor.getText = () => ''
+    mockEditor.getJSON = () => ({})
+    mockEditor.state.selection = { empty: true, from: 0, to: 0 }
+    mockEditor.chain = () => mockEditor
+    mockEditor.focus = () => mockEditor
+    mockEditor.insertContentAt = () => mockEditor
+    mockEditor.run = () => true
+    capturedConfig.current = null
+    aiEditPage.mockReset()
+    aiEditPage.mockResolvedValue({ data: { text: 'improved text' } })
+  })
+
+  it('shows AI action buttons when text is selected', () => {
+    mockEditor.state.selection = { empty: false, from: 1, to: 5 }
+    render(<PageEditor page={{ id: 1, content: {} }} />)
+    expect(screen.getByTitle('Improve')).toBeInTheDocument()
+    expect(screen.getByTitle('Shorter')).toBeInTheDocument()
+    expect(screen.getByTitle('Longer')).toBeInTheDocument()
+  })
+
+  it('does not show AI action buttons when no text is selected', () => {
+    mockEditor.state.selection = { empty: true, from: 0, to: 0 }
+    render(<PageEditor page={{ id: 1, content: {} }} />)
+    expect(screen.queryByTitle('Improve')).not.toBeInTheDocument()
+  })
+
+  it('calls aiEditPage and replaces selected text on Improve click', async () => {
+    mockEditor.state.selection = { empty: false, from: 1, to: 5 }
+    mockEditor.state.doc = { textBetween: () => 'hello' }
+    const insertContentAt = vi.fn().mockReturnThis()
+    const run = vi.fn()
+    mockEditor.chain = () => ({ focus: () => ({ insertContentAt, run }) })
+
+    render(<PageEditor page={{ id: 1, content: {} }} />)
+
+    await act(async () => {
+      screen.getByTitle('Improve').click()
+      await Promise.resolve()
+    })
+
+    expect(aiEditPage).toHaveBeenCalledWith(1, 'hello', 'improve')
+    expect(insertContentAt).toHaveBeenCalledWith({ from: 1, to: 5 }, 'improved text')
+    expect(run).toHaveBeenCalled()
   })
 })
