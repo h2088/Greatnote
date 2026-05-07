@@ -212,10 +212,13 @@ def ai_edit(request, pk):
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    client = OpenAI(
+        api_key=settings.OPENAI_API_KEY,
+        base_url=settings.OPENAI_BASE_URL or None,
+    )
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="kimi-latest",
             messages=[
                 {"role": "system", "content": AI_EDIT_PROMPTS[action]},
                 {"role": "user", "content": text},
