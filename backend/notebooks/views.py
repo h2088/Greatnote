@@ -338,7 +338,7 @@ def fetch_webpage(url):
 
 def build_openai_models():
     models = []
-    for model_name in (settings.OPENAI_MODEL, "gpt-5.3-codex", "gpt-4o-mini"):
+    for model_name in (settings.OPENAI_MODEL, "gpt-5.4"):
         if model_name and model_name not in models:
             models.append(model_name)
     return models

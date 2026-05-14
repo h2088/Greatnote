@@ -969,12 +969,12 @@ class AiEditTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['text'], 'Recovered text')
-        self.assertEqual(response.data['model'], 'gpt-5.3-codex')
+        self.assertEqual(response.data['model'], 'gpt-5.4')
         self.assertEqual(mock_client.chat.completions.create.call_count, 2)
         first_call = mock_client.chat.completions.create.call_args_list[0].kwargs
         second_call = mock_client.chat.completions.create.call_args_list[1].kwargs
         self.assertEqual(first_call['model'], 'unsupported-model')
-        self.assertEqual(second_call['model'], 'gpt-5.3-codex')
+        self.assertEqual(second_call['model'], 'gpt-5.4')
 
     def test_ai_edit_unauthenticated_returns_401(self):
         response = self.client.post(

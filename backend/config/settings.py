@@ -8,7 +8,7 @@ load_dotenv(BASE_DIR / ".env", override=True)
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL") or os.environ.get("ANTHROPIC_BASE_URL", "")
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL") or os.environ.get("ANTHROPIC_MODEL") or "gpt-5.3-codex"
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL") or os.environ.get("ANTHROPIC_MODEL") or "gpt-5.4"
 
 SECRET_KEY = "django-insecure-1^yhrlgk24mj^1$85ajavpx3%zp(2+45m)q8p=)%tp+=q=h05#"
 
