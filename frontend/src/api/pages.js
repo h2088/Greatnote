@@ -15,3 +15,4 @@ export const addSharedUser = (id, username) => client.post(`/pages/${id}/share/u
 export const removeSharedUser = (id, userId) => client.delete(`/pages/${id}/share/users/${userId}/`)
 export const getSharedWithMe = () => client.get('/shared-with-me/')
 export const aiEditPage = (id, text, action) => client.post(`/pages/${id}/ai-edit/`, { text, action })
+export const importWebpage = (notebookId, data) => client.post(`/notebooks/${notebookId}/import-webpage/`, data)

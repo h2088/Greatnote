@@ -3,6 +3,20 @@ from django.db import models
 from django.contrib.auth.models import User
 
 
+class TopicFolder(models.Model):
+    notebook = models.ForeignKey("Notebook", on_delete=models.CASCADE, related_name="topic_folders")
+    name = models.CharField(max_length=120)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+        unique_together = ["notebook", "name"]
+
+    def __str__(self):
+        return self.name
+
+
 class Notebook(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notebooks")
     title = models.CharField(max_length=255)
@@ -18,6 +32,13 @@ class Notebook(models.Model):
 
 class Page(models.Model):
     notebook = models.ForeignKey(Notebook, on_delete=models.CASCADE, related_name="pages")
+    topic_folder = models.ForeignKey(
+        TopicFolder,
+        on_delete=models.SET_NULL,
+        related_name="pages",
+        null=True,
+        blank=True,
+    )
     title = models.CharField(max_length=255, default="Untitled")
     content = models.JSONField(default=dict)
     order = models.PositiveIntegerField(default=0)
