@@ -9,12 +9,17 @@ urlpatterns = [
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("auth/me/", views.me, name="me"),
 
+    # Topic folders
+    path("topic-folders/", views.TopicFolderListCreateView.as_view(), name="topic-folder-list"),
+    path("topic-folders/<int:pk>/", views.TopicFolderDetailView.as_view(), name="topic-folder-detail"),
+
     # Notebooks
     path("notebooks/", views.NotebookListCreateView.as_view(), name="notebook-list"),
     path("notebooks/<int:pk>/", views.NotebookDetailView.as_view(), name="notebook-detail"),
 
     # Pages (nested under notebook)
     path("notebooks/<int:notebook_pk>/pages/", views.PageListCreateView.as_view(), name="page-list"),
+    path("notebooks/<int:notebook_pk>/import-webpage/", views.import_webpage, name="import-webpage"),
 
     # Pages (standalone)
     path("pages/favorites/", views.FavoritePageListView.as_view(), name="favorite-pages"),

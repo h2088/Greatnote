@@ -17,6 +17,13 @@ vi.mock('../api/pages', () => ({
   deletePage: vi.fn(),
   getFavoritePages: vi.fn(),
   toggleFavoritePage: vi.fn(),
+  updatePage: vi.fn(),
+}))
+vi.mock('../api/folders', () => ({
+  getTopicFolders: vi.fn(),
+  createTopicFolder: vi.fn(),
+  updateTopicFolder: vi.fn(),
+  deleteTopicFolder: vi.fn(),
 }))
 
 const mockInvalidateQueries = vi.fn()
@@ -28,14 +35,17 @@ vi.mock('@tanstack/react-query', () => ({
     }
     if (queryKey[0] === 'notebook') {
       return { data: { id: 1, title: 'My Notebook', pages: [
-        { id: 10, title: 'Page 1', is_favorite: false, notebook: 1 },
-        { id: 11, title: 'Fav Page', is_favorite: true, notebook: 1 },
+        { id: 10, title: 'Page 1', is_favorite: false, notebook: 1, topic_folder: null },
+        { id: 11, title: 'Fav Page', is_favorite: true, notebook: 1, topic_folder: null },
       ]}}
     }
     if (queryKey[0] === 'favorite-pages') {
       return { data: [
         { id: 11, title: 'Fav Page', notebook: 1 },
       ]}
+    }
+    if (queryKey[0] === 'topic-folders') {
+      return { data: [] }
     }
     return { data: null }
   },

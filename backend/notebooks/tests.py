@@ -2,11 +2,12 @@ import uuid
 from unittest.mock import patch, MagicMock
 
 from django.contrib.auth.models import User
-from django.test import override_settings
+from django.test import TestCase, override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Notebook, Page, PageUserShare, ShareLink
+from .models import Notebook, Page, PageUserShare, ShareLink, TopicFolder
+from .views import WebpageExtractor
 
 
 class AuthTests(APITestCase):
@@ -231,6 +232,372 @@ class PageTests(APITestCase):
         self.client.force_authenticate(user=self.user)
         response = self.client.get(f'/api/pages/{self.page.id}/')
         self.assertIsNone(response.data['share_token'])
+
+
+class TopicFolderTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='user1', password='password123')
+        self.other = User.objects.create_user(username='user2', password='password123')
+        self.notebook = Notebook.objects.create(user=self.user, title='My Notebook')
+        self.other_notebook = Notebook.objects.create(user=self.other, title='Other Notebook')
+        self.folder = TopicFolder.objects.create(notebook=self.notebook, name='Research')
+        self.page = Page.objects.create(notebook=self.notebook, title='Page 1')
+
+    def test_create_topic_folder(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post('/api/topic-folders/', {
+            'notebook': self.notebook.id,
+            'name': 'Ideas',
+        })
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(TopicFolder.objects.filter(notebook=self.notebook, name='Ideas').exists())
+
+    def test_list_topic_folders_filtered_by_notebook(self):
+        TopicFolder.objects.create(notebook=self.notebook, name='Archive')
+        TopicFolder.objects.create(notebook=self.other_notebook, name='Private')
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(f'/api/topic-folders/?notebook={self.notebook.id}')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual({item['name'] for item in response.data}, {'Research', 'Archive'})
+
+    def test_cannot_create_topic_folder_in_other_users_notebook(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post('/api/topic-folders/', {
+            'notebook': self.other_notebook.id,
+            'name': 'Hack',
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_can_assign_page_to_topic_folder(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.patch(
+            f'/api/pages/{self.page.id}/',
+            {'topic_folder': self.folder.id},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.page.refresh_from_db()
+        self.assertEqual(self.page.topic_folder_id, self.folder.id)
+
+    def test_cannot_assign_page_to_folder_from_other_notebook(self):
+        other_folder = TopicFolder.objects.create(notebook=self.other_notebook, name='Foreign')
+        self.client.force_authenticate(user=self.user)
+        response = self.client.patch(
+            f'/api/pages/{self.page.id}/',
+            {'topic_folder': other_folder.id},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_delete_topic_folder_unassigns_existing_pages(self):
+        self.page.topic_folder = self.folder
+        self.page.save(update_fields=['topic_folder'])
+        self.client.force_authenticate(user=self.user)
+        response = self.client.delete(f'/api/topic-folders/{self.folder.id}/')
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.page.refresh_from_db()
+        self.assertIsNone(self.page.topic_folder)
+
+
+class ImportWebpageTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='user1', password='password123')
+        self.other = User.objects.create_user(username='user2', password='password123')
+        self.notebook = Notebook.objects.create(user=self.user, title='My Notebook')
+        self.other_notebook = Notebook.objects.create(user=self.other, title='Other Notebook')
+        self.folder = TopicFolder.objects.create(notebook=self.notebook, name='Web Clips')
+        self.other_folder = TopicFolder.objects.create(notebook=self.other_notebook, name='Private')
+
+    @patch('notebooks.views.fetch_webpage')
+    def test_import_webpage_creates_page_with_remote_images(self, mock_fetch_webpage):
+        doc = {
+            'type': 'doc',
+            'content': [
+                {
+                    'type': 'heading',
+                    'attrs': {'level': 1},
+                    'content': [{'type': 'text', 'text': 'Example article'}],
+                },
+                {
+                    'type': 'paragraph',
+                    'content': [{'type': 'text', 'text': 'Source: https://example.com/article'}],
+                },
+                {
+                    'type': 'paragraph',
+                    'content': [{'type': 'text', 'text': 'Import mode: Basic fallback (no readable text extracted)'}],
+                },
+                {
+                    'type': 'paragraph',
+                    'content': [{'type': 'text', 'text': 'Hello world'}],
+                },
+                {
+                    'type': 'image',
+                    'attrs': {'src': 'https://example.com/image.png', 'alt': 'hero', 'title': ''},
+                },
+            ],
+        }
+        parsed = MagicMock()
+        parsed.title = 'Example article'
+        parsed.base_url = 'https://example.com/article'
+        parsed.get_plain_text.return_value = ''
+        parsed.get_image_nodes.return_value = [doc['content'][1]]
+        parsed.build_tiptap_doc.return_value = doc
+        parsed.build_basic_tiptap_doc.return_value = doc
+        mock_fetch_webpage.return_value = parsed
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/notebooks/{self.notebook.id}/import-webpage/',
+            {'url': 'https://example.com/article'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        page = Page.objects.get(id=response.data['id'])
+        self.assertEqual(page.title, 'Example article')
+        self.assertEqual(response.data['import_mode'], 'fallback')
+        image_nodes = [node for node in page.content['content'] if node['type'] == 'image']
+        self.assertEqual(len(image_nodes), 1)
+        self.assertEqual(image_nodes[0]['attrs']['src'], 'https://example.com/image.png')
+
+    def test_import_webpage_requires_url(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/notebooks/{self.notebook.id}/import-webpage/',
+            {},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch('notebooks.views.fetch_webpage')
+    def test_import_webpage_can_assign_topic_folder(self, mock_fetch_webpage):
+        parsed = MagicMock()
+        parsed.title = 'Imported into folder'
+        parsed.base_url = 'https://example.com/article'
+        parsed.get_plain_text.return_value = ''
+        parsed.get_image_nodes.return_value = []
+        parsed.build_tiptap_doc.return_value = {'type': 'doc', 'content': []}
+        parsed.build_basic_tiptap_doc.return_value = {'type': 'doc', 'content': []}
+        mock_fetch_webpage.return_value = parsed
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/notebooks/{self.notebook.id}/import-webpage/',
+            {
+                'url': 'https://example.com/article',
+                'topic_folder': self.folder.id,
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        page = Page.objects.get(id=response.data['id'])
+        self.assertEqual(page.topic_folder_id, self.folder.id)
+        self.assertEqual(response.data['import_mode'], 'fallback')
+
+    @patch('notebooks.views.fetch_webpage')
+    def test_import_webpage_rejects_folder_from_other_notebook(self, mock_fetch_webpage):
+        parsed = MagicMock()
+        parsed.title = 'Should not import'
+        parsed.base_url = 'https://example.com/article'
+        parsed.get_plain_text.return_value = ''
+        parsed.get_image_nodes.return_value = []
+        parsed.build_tiptap_doc.return_value = {'type': 'doc', 'content': []}
+        parsed.build_basic_tiptap_doc.return_value = {'type': 'doc', 'content': []}
+        mock_fetch_webpage.return_value = parsed
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/notebooks/{self.notebook.id}/import-webpage/',
+            {
+                'url': 'https://example.com/article',
+                'topic_folder': self.other_folder.id,
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    @override_settings(OPENAI_API_KEY='test-key', OPENAI_MODEL='gpt-5.4')
+    @patch('notebooks.views.OpenAI')
+    @patch('notebooks.views.fetch_webpage')
+    def test_import_webpage_uses_ai_to_structure_notes(self, mock_fetch_webpage, mock_openai_class):
+        parsed = MagicMock()
+        parsed.base_url = 'https://example.com/article'
+        parsed.title = 'Raw article'
+        parsed.get_plain_text.return_value = 'Paragraph one.\n\nParagraph two.'
+        parsed.get_image_nodes.return_value = [
+            {'type': 'image', 'attrs': {'src': 'https://example.com/image.png', 'alt': 'hero', 'title': ''}},
+        ]
+        parsed.build_basic_tiptap_doc.return_value = {'type': 'doc', 'content': [{'type': 'paragraph'}]}
+        mock_fetch_webpage.return_value = parsed
+
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+        mock_choice = MagicMock()
+        mock_choice.message.content = '''
+        {
+          "title": "AI Notes Title",
+          "summary": "A short summary.",
+          "key_points": ["Point one", "Point two"],
+          "body": ["Body paragraph one.", "Body paragraph two."]
+        }
+        '''
+        mock_client.chat.completions.create.return_value = MagicMock(choices=[mock_choice])
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/notebooks/{self.notebook.id}/import-webpage/',
+            {'url': 'https://example.com/article'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        page = Page.objects.get(id=response.data['id'])
+        self.assertEqual(page.title, 'AI Notes Title')
+        self.assertEqual(response.data['import_mode'], 'ai')
+        self.assertEqual(response.data['import_detail'], 'gpt-5.4')
+        content_texts = [
+            node['content'][0]['text']
+            for node in page.content['content']
+            if node.get('content') and node['content'] and node['content'][0].get('type') == 'text'
+        ]
+        self.assertIn('Source: https://example.com/article', content_texts)
+        self.assertIn('Import mode: AI organized (gpt-5.4)', content_texts)
+        self.assertIn('Summary', content_texts)
+        self.assertIn('A short summary.', content_texts)
+        self.assertIn('Key Points', content_texts)
+        self.assertIn('Notes', content_texts)
+        self.assertIn('Body paragraph one.', content_texts)
+
+    @override_settings(OPENAI_API_KEY='test-key', OPENAI_MODEL='gpt-5.4')
+    @patch('notebooks.views.OpenAI')
+    @patch('notebooks.views.fetch_webpage')
+    def test_import_webpage_falls_back_to_basic_doc_when_ai_fails(self, mock_fetch_webpage, mock_openai_class):
+        parsed = MagicMock()
+        parsed.base_url = 'https://example.com/article'
+        parsed.title = 'Fallback title'
+        parsed.get_plain_text.return_value = 'Paragraph one.'
+        parsed.get_image_nodes.return_value = []
+        parsed.build_basic_tiptap_doc.return_value = {
+            'type': 'doc',
+            'content': [{'type': 'paragraph', 'content': [{'type': 'text', 'text': 'Source: https://example.com/article'}]}],
+        }
+        mock_fetch_webpage.return_value = parsed
+
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = Exception('AI failed')
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/notebooks/{self.notebook.id}/import-webpage/',
+            {'url': 'https://example.com/article'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        page = Page.objects.get(id=response.data['id'])
+        self.assertEqual(page.title, 'Fallback title')
+        self.assertEqual(response.data['import_mode'], 'fallback')
+        self.assertIn('AI import failed', response.data['import_detail'])
+        content_texts = [
+            node['content'][0]['text']
+            for node in page.content['content']
+            if node.get('content') and node['content'] and node['content'][0].get('type') == 'text'
+        ]
+        self.assertIn('Source: https://example.com/article', content_texts)
+        self.assertTrue(any(text.startswith('Import mode: Basic fallback') for text in content_texts))
+
+
+class WebpageExtractorTests(TestCase):
+    def test_prefers_article_content_and_ignores_nav_and_footer_text(self):
+        extractor = WebpageExtractor('https://example.com/post')
+        extractor.feed(
+            '''
+            <html>
+              <head><title>Example Post</title></head>
+              <body>
+                <nav><p>Home</p><p>Pricing</p></nav>
+                <article>
+                  <h1>Main heading</h1>
+                  <p>Important paragraph one.</p>
+                  <p>Important paragraph two.</p>
+                </article>
+                <footer><p>Footer links</p></footer>
+              </body>
+            </html>
+            '''
+        )
+        doc = extractor.build_tiptap_doc()
+        texts = [
+            node['content'][0]['text']
+            for node in doc['content']
+            if node.get('content')
+        ]
+        self.assertIn('Source: https://example.com/post', texts)
+        self.assertIn('Main heading', texts)
+        self.assertIn('Important paragraph one.', texts)
+        self.assertIn('Important paragraph two.', texts)
+        self.assertNotIn('Home', texts)
+        self.assertNotIn('Pricing', texts)
+        self.assertNotIn('Footer links', texts)
+
+    def test_ignores_logo_images_outside_main_content(self):
+        extractor = WebpageExtractor('https://example.com/post')
+        extractor.feed(
+            '''
+            <html>
+              <body>
+                <img src="/logo.png" alt="logo" class="site-logo" />
+                <p>Readable text.</p>
+                <img src="/photo.jpg" alt="Article image" />
+              </body>
+            </html>
+            '''
+        )
+        doc = extractor.build_tiptap_doc()
+        image_nodes = [node for node in doc['content'] if node['type'] == 'image']
+        self.assertEqual(len(image_nodes), 1)
+        self.assertEqual(image_nodes[0]['attrs']['src'], 'https://example.com/photo.jpg')
+
+    def test_extracts_douban_book_metadata_and_sections(self):
+        extractor = WebpageExtractor('https://book.douban.com/subject/35603043/')
+        html = '''
+        <html>
+          <head>
+            <title>豆瓣图书</title>
+            <meta name="description" content="一本关于民国司法史的著作" />
+          </head>
+          <body>
+            <h1><span property="v:itemreviewed">施剑翘复仇案</span></h1>
+            <div id="info">
+              <span class="pl">作者</span>: 罗志田<br/>
+              <span class="pl">出版社</span>: 广西师范大学出版社<br/>
+              <span class="pl">ISBN</span>: 9787549565432<br/>
+            </div>
+            <strong property="v:average">8.7</strong>
+            <span property="v:votes">1234</span>
+            <h2><span>内容简介</span></h2>
+            <div class="intro">
+              <p>这是内容简介第一段。</p>
+              <p>这是内容简介第二段。</p>
+            </div>
+            <h2><span>作者简介</span></h2>
+            <div class="intro">
+              <p>作者长期研究近代中国史。</p>
+            </div>
+          </body>
+        </html>
+        '''
+        extractor.feed(html)
+        extractor.close()
+        extractor.enrich_from_html(html)
+
+        plain_text = extractor.get_plain_text()
+        self.assertEqual(extractor.title, '施剑翘复仇案')
+        self.assertIn('作者 : 罗志田', plain_text)
+        self.assertIn('出版社 : 广西师范大学出版社', plain_text)
+        self.assertIn('ISBN : 9787549565432', plain_text)
+        self.assertIn('Douban rating: 8.7 (1234 ratings)', plain_text)
+        self.assertIn('内容简介', plain_text)
+        self.assertIn('这是内容简介第一段。', plain_text)
+        self.assertIn('作者简介', plain_text)
+        self.assertIn('作者长期研究近代中国史。', plain_text)
 
 
 class ShareLinkTests(APITestCase):
@@ -577,9 +944,37 @@ class AiEditTests(APITestCase):
         self.assertEqual(response.data['text'], 'Improved text')
         mock_client.chat.completions.create.assert_called_once()
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
-        self.assertEqual(call_kwargs['model'], 'gpt-4o-mini')
+        self.assertEqual(call_kwargs['model'], 'gpt-5.4')
         self.assertEqual(call_kwargs['messages'][0]['role'], 'system')
         self.assertEqual(call_kwargs['messages'][1]['content'], 'hello world')
+
+    @override_settings(OPENAI_API_KEY='test-key', OPENAI_MODEL='unsupported-model')
+    @patch('notebooks.views.OpenAI')
+    def test_ai_edit_falls_back_to_secondary_model(self, mock_openai_class):
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+        mock_choice = MagicMock()
+        mock_choice.message.content = 'Recovered text'
+        mock_client.chat.completions.create.side_effect = [
+            Exception('model not found'),
+            MagicMock(choices=[mock_choice]),
+        ]
+
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(
+            f'/api/pages/{self.page.id}/ai-edit/',
+            {'text': 'hello world', 'action': 'improve'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['text'], 'Recovered text')
+        self.assertEqual(response.data['model'], 'gpt-5.3-codex')
+        self.assertEqual(mock_client.chat.completions.create.call_count, 2)
+        first_call = mock_client.chat.completions.create.call_args_list[0].kwargs
+        second_call = mock_client.chat.completions.create.call_args_list[1].kwargs
+        self.assertEqual(first_call['model'], 'unsupported-model')
+        self.assertEqual(second_call['model'], 'gpt-5.3-codex')
 
     def test_ai_edit_unauthenticated_returns_401(self):
         response = self.client.post(

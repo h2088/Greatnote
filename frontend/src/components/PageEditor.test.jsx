@@ -4,13 +4,24 @@ import { vi, beforeEach, afterEach } from 'vitest'
 
 const { mockEditor, capturedConfig } = vi.hoisted(() => ({
   mockEditor: {
+    _listeners: {},
     getText: () => '',
     getJSON: () => ({}),
     isActive: () => false,
     commands: { setContent: () => {} },
     state: { selection: { empty: true, from: 0, to: 0 } },
+    on(event, handler) {
+      this._listeners[event] = handler
+    },
+    off(event) {
+      delete this._listeners[event]
+    },
   },
   capturedConfig: { current: null },
+}))
+
+vi.mock('@tiptap/core', () => ({
+  Node: { create: () => ({}) },
 }))
 
 vi.mock('@tiptap/react', () => ({
@@ -40,6 +51,7 @@ import { updatePage, aiEditPage } from '../api/pages'
 
 describe('PageEditor word/character count', () => {
   beforeEach(() => {
+    mockEditor._listeners = {}
     mockEditor.getText = () => ''
     mockEditor.getJSON = () => ({})
     mockEditor.state.selection = { empty: true, from: 0, to: 0 }
@@ -48,9 +60,9 @@ describe('PageEditor word/character count', () => {
     aiEditPage.mockClear()
   })
 
-  it('renders 0 words · 0 chars for an empty page', () => {
+  it('renders 0 words | 0 chars for an empty page', () => {
     render(<PageEditor page={{ id: 1, content: {} }} />)
-    expect(screen.getByText('0 words · 0 chars')).toBeInTheDocument()
+    expect(screen.getByText('0 words | 0 chars')).toBeInTheDocument()
   })
 
   it('updates counts when the editor onUpdate fires', () => {
@@ -59,7 +71,7 @@ describe('PageEditor word/character count', () => {
     act(() => {
       capturedConfig.current.onUpdate({ editor: mockEditor })
     })
-    expect(screen.getByText('3 words · 15 chars')).toBeInTheDocument()
+    expect(screen.getByText('3 words | 15 chars')).toBeInTheDocument()
   })
 
   it('formats large counts with thousands separators', () => {
@@ -72,7 +84,7 @@ describe('PageEditor word/character count', () => {
       capturedConfig.current.onUpdate({ editor: mockEditor })
     })
     expect(
-      screen.getByText(/342\s+words\s+·\s+1[,.\s]?840\s+chars/)
+      screen.getByText(/342\s+words\s+\|\s+1[,.\s]?840\s+chars/)
     ).toBeInTheDocument()
   })
 })
@@ -80,6 +92,7 @@ describe('PageEditor word/character count', () => {
 describe('PageEditor auto-save', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    mockEditor._listeners = {}
     mockEditor.getText = () => ''
     mockEditor.getJSON = () => ({})
     mockEditor.state.selection = { empty: true, from: 0, to: 0 }
@@ -115,11 +128,9 @@ describe('PageEditor auto-save', () => {
     act(() => { vi.advanceTimersByTime(100) })
     fireTyping({ v: 5 })
 
-    // 999ms after the last keystroke — debounce should NOT have fired yet
     act(() => { vi.advanceTimersByTime(999) })
     expect(updatePage).not.toHaveBeenCalled()
 
-    // 1000ms after the last keystroke — debounce fires once
     await act(async () => { await vi.advanceTimersByTimeAsync(1) })
     expect(updatePage).toHaveBeenCalledTimes(1)
     expect(updatePage).toHaveBeenCalledWith(1, { content: { v: 5 } })
@@ -133,11 +144,9 @@ describe('PageEditor auto-save', () => {
     expect(updatePage).not.toHaveBeenCalled()
 
     fireTyping({ v: 'b' })
-    // 999ms after the SECOND keystroke (1499ms total) — still not fired
     act(() => { vi.advanceTimersByTime(999) })
     expect(updatePage).not.toHaveBeenCalled()
 
-    // 1000ms after the second keystroke — now fires
     await act(async () => { await vi.advanceTimersByTimeAsync(1) })
     expect(updatePage).toHaveBeenCalledTimes(1)
     expect(updatePage).toHaveBeenCalledWith(1, { content: { v: 'b' } })
@@ -172,9 +181,7 @@ describe('PageEditor auto-save', () => {
     expect(updatePage).toHaveBeenCalledTimes(1)
   })
 
-  it('flushes the pending save with the OLD page id when page swaps in place', () => {
-    // Defensive: production wraps PageEditor in `key={page.id}` (forced remount), but if a
-    // future caller drops that key, an in-place page.id swap must still PATCH the old page.
+  it('flushes the pending save with the old page id when page swaps in place', () => {
     const { rerender, unmount } = render(<PageEditor page={{ id: 1, content: {} }} />)
 
     fireTyping({ pageOne: true })
@@ -201,7 +208,6 @@ describe('PageEditor auto-save', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
     expect(updatePage).toHaveBeenCalledTimes(1)
 
-    // unmount while the PATCH promise is unresolved — must not crash and must not re-fire
     act(() => { unmount() })
     expect(updatePage).toHaveBeenCalledTimes(1)
 
@@ -226,6 +232,7 @@ describe('PageEditor auto-save', () => {
 
 describe('PageEditor AI editing', () => {
   beforeEach(() => {
+    mockEditor._listeners = {}
     mockEditor.getText = () => ''
     mockEditor.getJSON = () => ({})
     mockEditor.state.selection = { empty: true, from: 0, to: 0 }
@@ -269,5 +276,33 @@ describe('PageEditor AI editing', () => {
     expect(aiEditPage).toHaveBeenCalledWith(1, 'hello', 'improve')
     expect(insertContentAt).toHaveBeenCalledWith({ from: 1, to: 5 }, 'improved text')
     expect(run).toHaveBeenCalled()
+  })
+
+  it('prevents bubble menu buttons from stealing focus on mousedown', () => {
+    mockEditor.state.selection = { empty: false, from: 1, to: 5 }
+    render(<PageEditor page={{ id: 1, content: {} }} />)
+
+    const improveButton = screen.getByTitle('Improve')
+    const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+    improveButton.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('shows the backend error when AI editing fails', async () => {
+    mockEditor.state.selection = { empty: false, from: 1, to: 5 }
+    mockEditor.state.doc = { textBetween: () => 'hello' }
+    aiEditPage.mockRejectedValue({
+      response: { data: { detail: 'AI editing is not configured' } },
+    })
+
+    render(<PageEditor page={{ id: 1, content: {} }} />)
+
+    await act(async () => {
+      screen.getByTitle('Improve').click()
+      await Promise.resolve()
+    })
+
+    expect(screen.getByText('AI editing is not configured')).toBeInTheDocument()
   })
 })

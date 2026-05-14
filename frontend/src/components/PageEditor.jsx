@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
+import { Node } from '@tiptap/core'
 import { useEditor, EditorContent } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
 import StarterKit from '@tiptap/starter-kit'
@@ -6,20 +7,40 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { updatePage, aiEditPage } from '../api/pages'
 import AutoSaveIndicator from './AutoSaveIndicator'
 
+const RemoteImage = Node.create({
+  name: 'image',
+  group: 'block',
+  draggable: true,
+  selectable: true,
+  addAttributes() {
+    return {
+      src: { default: null },
+      alt: { default: '' },
+      title: { default: '' },
+    }
+  },
+  parseHTML() {
+    return [{ tag: 'img[src]' }]
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['img', HTMLAttributes]
+  },
+})
+
 const BUBBLE_BUTTONS = [
-  { label: 'B', title: 'Bold (Ctrl+B)', action: (e) => e.chain().focus().toggleBold().run(), active: (e) => e.isActive('bold'), shortcut: 'Ctrl+B' },
-  { label: 'I', title: 'Italic (Ctrl+I)', action: (e) => e.chain().focus().toggleItalic().run(), active: (e) => e.isActive('italic'), shortcut: 'Ctrl+I' },
-  { label: 'S', title: 'Strike (Ctrl+Shift+S)', action: (e) => e.chain().focus().toggleStrike().run(), active: (e) => e.isActive('strike'), shortcut: 'Ctrl+Shift+S' },
+  { label: 'B', title: 'Bold (Ctrl+B)', action: (e) => e.chain().focus().toggleBold().run(), active: (e) => e.isActive('bold') },
+  { label: 'I', title: 'Italic (Ctrl+I)', action: (e) => e.chain().focus().toggleItalic().run(), active: (e) => e.isActive('italic') },
+  { label: 'S', title: 'Strike (Ctrl+Shift+S)', action: (e) => e.chain().focus().toggleStrike().run(), active: (e) => e.isActive('strike') },
   { divider: true },
-  { label: 'H1', title: 'Heading 1 (Ctrl+Alt+1)', action: (e) => e.chain().focus().toggleHeading({ level: 1 }).run(), active: (e) => e.isActive('heading', { level: 1 }), shortcut: 'Ctrl+Alt+1' },
-  { label: 'H2', title: 'Heading 2 (Ctrl+Alt+2)', action: (e) => e.chain().focus().toggleHeading({ level: 2 }).run(), active: (e) => e.isActive('heading', { level: 2 }), shortcut: 'Ctrl+Alt+2' },
-  { label: 'H3', title: 'Heading 3 (Ctrl+Alt+3)', action: (e) => e.chain().focus().toggleHeading({ level: 3 }).run(), active: (e) => e.isActive('heading', { level: 3 }), shortcut: 'Ctrl+Alt+3' },
+  { label: 'H1', title: 'Heading 1 (Ctrl+Alt+1)', action: (e) => e.chain().focus().toggleHeading({ level: 1 }).run(), active: (e) => e.isActive('heading', { level: 1 }) },
+  { label: 'H2', title: 'Heading 2 (Ctrl+Alt+2)', action: (e) => e.chain().focus().toggleHeading({ level: 2 }).run(), active: (e) => e.isActive('heading', { level: 2 }) },
+  { label: 'H3', title: 'Heading 3 (Ctrl+Alt+3)', action: (e) => e.chain().focus().toggleHeading({ level: 3 }).run(), active: (e) => e.isActive('heading', { level: 3 }) },
   { divider: true },
-  { label: '•', title: 'Bullet list (Ctrl+Shift+8)', action: (e) => e.chain().focus().toggleBulletList().run(), active: (e) => e.isActive('bulletList'), shortcut: 'Ctrl+Shift+8' },
-  { label: '1.', title: 'Ordered list (Ctrl+Shift+7)', action: (e) => e.chain().focus().toggleOrderedList().run(), active: (e) => e.isActive('orderedList'), shortcut: 'Ctrl+Shift+7' },
+  { label: 'UL', title: 'Bullet list (Ctrl+Shift+8)', action: (e) => e.chain().focus().toggleBulletList().run(), active: (e) => e.isActive('bulletList') },
+  { label: '1.', title: 'Ordered list (Ctrl+Shift+7)', action: (e) => e.chain().focus().toggleOrderedList().run(), active: (e) => e.isActive('orderedList') },
   { divider: true },
-  { label: '❝', title: 'Blockquote (Ctrl+Shift+B)', action: (e) => e.chain().focus().toggleBlockquote().run(), active: (e) => e.isActive('blockquote'), shortcut: 'Ctrl+Shift+B' },
-  { label: '</>', title: 'Code block (Ctrl+Alt+C)', action: (e) => e.chain().focus().toggleCodeBlock().run(), active: (e) => e.isActive('codeBlock'), shortcut: 'Ctrl+Alt+C' },
+  { label: 'BQ', title: 'Blockquote (Ctrl+Shift+B)', action: (e) => e.chain().focus().toggleBlockquote().run(), active: (e) => e.isActive('blockquote') },
+  { label: '</>', title: 'Code block (Ctrl+Alt+C)', action: (e) => e.chain().focus().toggleCodeBlock().run(), active: (e) => e.isActive('codeBlock') },
 ]
 
 const AI_ACTIONS = [
@@ -31,11 +52,17 @@ const AI_ACTIONS = [
   { label: 'Casual', action: 'casual' },
 ]
 
+const keepEditorSelection = (event) => {
+  event.preventDefault()
+}
+
 export default function PageEditor({ page }) {
   const [saveStatus, setSaveStatus] = useState(null)
   const [wordCount, setWordCount] = useState(0)
   const [charCount, setCharCount] = useState(0)
   const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState('')
+  const [hasTextSelection, setHasTextSelection] = useState(false)
   const saveTimer = useRef(null)
   const pendingContent = useRef(null)
   const editorRef = useRef(null)
@@ -79,12 +106,13 @@ export default function PageEditor({ page }) {
       const selectedText = editor.state.doc.textBetween(from, to)
       if (!selectedText.trim()) return
 
+      setAiError('')
       setAiLoading(true)
       try {
         const { data } = await aiEditPage(page.id, selectedText, action)
         editor.chain().focus().insertContentAt({ from, to }, data.text).run()
-      } catch {
-        // Error is silent; original text remains selected
+      } catch (error) {
+        setAiError(error?.response?.data?.detail || 'AI editing failed. Check the model/API configuration and try again.')
       } finally {
         setAiLoading(false)
       }
@@ -143,17 +171,18 @@ export default function PageEditor({ page }) {
     extensions: [
       StarterKit,
       Placeholder.configure({ placeholder: 'Start writing...' }),
+      RemoteImage,
     ],
     content: page.content && Object.keys(page.content).length > 0 ? page.content : '',
     editorProps: {
       handleKeyDown,
     },
-    onUpdate: ({ editor }) => {
-      const text = editor.getText()
+    onUpdate: ({ editor: currentEditor }) => {
+      const text = currentEditor.getText()
       const words = text.trim() === '' ? 0 : text.trim().split(/\s+/).length
       setWordCount(words)
       setCharCount(text.length)
-      pendingContent.current = editor.getJSON()
+      pendingContent.current = currentEditor.getJSON()
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(() => {
         saveTimer.current = null
@@ -170,6 +199,7 @@ export default function PageEditor({ page }) {
 
   useEffect(() => {
     if (editor && page) {
+      setAiError('')
       const newContent = page.content && Object.keys(page.content).length > 0 ? page.content : ''
       if (JSON.stringify(editor.getJSON()) !== JSON.stringify(newContent)) {
         editor.commands.setContent(newContent, false)
@@ -183,22 +213,23 @@ export default function PageEditor({ page }) {
       }, 0)
       return () => clearTimeout(timeoutId)
     }
+    return undefined
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page.id])
 
-  const [hasTextSelection, setHasTextSelection] = useState(false)
-
   useEffect(() => {
-    if (!editor) return
+    if (!editor) return undefined
     const update = () => setHasTextSelection(!editor.state.selection.empty)
     editor.on('selectionUpdate', update)
     update()
-    return () => { editor.off('selectionUpdate', update) }
+    return () => {
+      editor.off('selectionUpdate', update)
+    }
   }, [editor])
 
   return (
-    <div className="flex flex-col h-full relative">
-      <div className="absolute top-3 right-4 z-10">
+    <div className="relative flex h-full flex-col">
+      <div className="absolute right-4 top-3 z-10">
         <AutoSaveIndicator status={saveStatus} />
       </div>
 
@@ -206,32 +237,33 @@ export default function PageEditor({ page }) {
         <BubbleMenu
           editor={editor}
           tippyOptions={{ duration: 150, placement: 'top' }}
-          className="flex items-center gap-0.5 px-2 py-1.5 bg-gray-800 rounded-lg shadow-lg"
+          className="flex items-center gap-0.5 rounded-lg bg-gray-800 px-2 py-1.5 shadow-lg"
         >
-          {BUBBLE_BUTTONS.map((btn, i) =>
+          {BUBBLE_BUTTONS.map((btn, i) => (
             btn.divider ? (
-              <div key={`div-${i}`} className="w-px h-5 bg-gray-600 mx-0.5" />
+              <div key={`div-${i}`} className="mx-0.5 h-5 w-px bg-gray-600" />
             ) : (
               <button
                 key={btn.title}
                 title={btn.title}
+                onMouseDown={keepEditorSelection}
                 onClick={() => btn.action(editor)}
                 disabled={aiLoading}
-                className={`px-2 py-1 rounded text-sm font-mono transition-colors ${
-                  editor && btn.active(editor)
+                className={`rounded px-2 py-1 font-mono text-sm transition-colors ${
+                  btn.active(editor)
                     ? 'bg-indigo-500 text-white'
                     : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                } ${aiLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                } ${aiLoading ? 'cursor-not-allowed opacity-50' : ''}`}
               >
                 {btn.label}
               </button>
             )
-          )}
+          ))}
 
-          <div className="w-px h-5 bg-gray-600 mx-0.5" />
+          <div className="mx-0.5 h-5 w-px bg-gray-600" />
           <span
             title={hasTextSelection ? 'AI editing options' : 'Select text to enable AI editing'}
-            className={`text-[10px] font-bold px-1 rounded ${
+            className={`rounded px-1 text-[10px] font-bold ${
               hasTextSelection ? 'text-emerald-400' : 'text-gray-500'
             }`}
           >
@@ -244,10 +276,11 @@ export default function PageEditor({ page }) {
                 <button
                   key={btn.action}
                   title={btn.label}
+                  onMouseDown={keepEditorSelection}
                   onClick={() => handleAiEdit(btn.action)}
                   disabled={aiLoading}
-                  className={`px-2 py-1 rounded text-xs font-medium transition-colors text-emerald-300 hover:bg-gray-700 hover:text-emerald-200 ${
-                    aiLoading ? 'opacity-50 cursor-not-allowed' : ''
+                  className={`rounded px-2 py-1 text-xs font-medium text-emerald-300 transition-colors hover:bg-gray-700 hover:text-emerald-200 ${
+                    aiLoading ? 'cursor-not-allowed opacity-50' : ''
                   }`}
                 >
                   {aiLoading ? '...' : btn.label}
@@ -255,21 +288,27 @@ export default function PageEditor({ page }) {
               ))}
             </>
           ) : (
-            <span className="text-[10px] text-gray-500 px-1">select text</span>
+            <span className="px-1 text-[10px] text-gray-500">select text</span>
           )}
         </BubbleMenu>
       )}
 
       <div className="flex-1 overflow-y-auto px-8 py-6">
-        <EditorContent editor={editor} className="tiptap prose max-w-none min-h-full" />
+        <EditorContent editor={editor} className="tiptap prose min-h-full max-w-none" />
       </div>
 
-      <div className="px-4 py-2 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
+      {aiError ? (
+        <div className="border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+          {aiError}
+        </div>
+      ) : null}
+
+      <div className="flex items-center justify-between border-t border-gray-100 bg-gray-50 px-4 py-2">
         <span className="text-xs text-gray-400">
-          Ctrl+Alt+1-3 headings · Ctrl+Shift+7/8 lists · Ctrl+Shift+B blockquote · Ctrl+Alt+C code
+          Ctrl+Alt+1-3 headings | Ctrl+Shift+7/8 lists | Ctrl+Shift+B blockquote | Ctrl+Alt+C code
         </span>
         <span className="text-xs text-gray-400">
-          {wordCount.toLocaleString()} words · {charCount.toLocaleString()} chars
+          {wordCount.toLocaleString()} words | {charCount.toLocaleString()} chars
         </span>
       </div>
     </div>
